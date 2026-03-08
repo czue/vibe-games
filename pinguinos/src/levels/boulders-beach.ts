@@ -120,13 +120,25 @@ export class BouldersBeach implements Level {
     size: number,
     position: { x: number; y: number; z: number }
   ): void {
-    const geometry = new THREE.IcosahedronGeometry(size, 1);
+    // Use detail level 2 for smoother shape, then merge vertices for consistent displacement
+    const geometry = new THREE.IcosahedronGeometry(size, 2);
     const positionAttr = geometry.getAttribute('position');
+    // Displace each vertex along its radial direction by a small random amount
+    // Use a seeded approach: round position to grid to ensure shared-position vertices get same offset
+    const displacementMap = new Map<string, number>();
     for (let i = 0; i < positionAttr.count; i++) {
-      const scale = 0.8 + Math.random() * 0.4;
-      positionAttr.setX(i, positionAttr.getX(i) * scale);
-      positionAttr.setY(i, positionAttr.getY(i) * scale);
-      positionAttr.setZ(i, positionAttr.getZ(i) * scale);
+      const x = positionAttr.getX(i);
+      const y = positionAttr.getY(i);
+      const z = positionAttr.getZ(i);
+      // Key by rounded position so duplicate vertices at same location get same displacement
+      const key = `${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)}`;
+      if (!displacementMap.has(key)) {
+        displacementMap.set(key, 0.85 + Math.random() * 0.3);
+      }
+      const scale = displacementMap.get(key)!;
+      positionAttr.setX(i, x * scale);
+      positionAttr.setY(i, y * scale);
+      positionAttr.setZ(i, z * scale);
     }
     positionAttr.needsUpdate = true;
     geometry.computeVertexNormals();

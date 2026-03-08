@@ -12,8 +12,8 @@ export class PlayerController {
   private _isGrounded = false;
 
   private readonly moveSpeed = 5;
-  private readonly jumpImpulse = 7;
-  private readonly groundRayThreshold = 1.0;
+  private readonly jumpImpulse = 3.5;
+  private readonly groundRayThreshold = 0.15;
   private readonly lerpFactor = 0.15;
   private readonly rotationLerpFactor = 0.15;
 
@@ -75,10 +75,10 @@ export class PlayerController {
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
     this.penguinGroup.rotation.y = currentRotation + angleDiff * this.rotationLerpFactor;
 
-    // Ground check
+    // Ground check — start ray below the capsule (center - halfHeight - radius = -0.8)
     const pos = this.rigidBody.translation();
     const ray = new this.rapier.Ray(
-      { x: pos.x, y: pos.y, z: pos.z },
+      { x: pos.x, y: pos.y - 0.8, z: pos.z },
       { x: 0, y: -1, z: 0 },
     );
     const hit = this.world.castRay(ray, 2.0, true);
