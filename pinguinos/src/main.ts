@@ -40,14 +40,18 @@ async function startGame() {
   scene.add(groundMesh);
 
   // Penguin
-  const penguin = createPenguin();
-  penguin.group.position.set(0, 2, 0);
+  const penguin = createPenguin(world, RAPIER);
   scene.add(penguin.group);
 
   // Animation loop
   function animate() {
     requestAnimationFrame(animate);
     world.step();
+
+    // Sync penguin mesh position to physics body
+    const t = penguin.rigidBody.translation();
+    penguin.group.position.set(t.x, t.y, t.z);
+
     renderer.render(scene, camera);
   }
   animate();

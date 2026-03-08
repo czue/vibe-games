@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type RAPIER from '@dimforge/rapier3d-compat';
 
 export interface PenguinParts {
   body: THREE.Mesh;
@@ -8,7 +9,10 @@ export interface PenguinParts {
   rightFoot: THREE.Mesh;
 }
 
-export function createPenguin(): { group: THREE.Group; parts: PenguinParts } {
+export function createPenguin(
+  world: InstanceType<typeof RAPIER.World>,
+  rapier: typeof RAPIER,
+): { group: THREE.Group; parts: PenguinParts; rigidBody: InstanceType<typeof RAPIER.RigidBody> } {
   const group = new THREE.Group();
 
   // Materials
@@ -86,6 +90,16 @@ export function createPenguin(): { group: THREE.Group; parts: PenguinParts } {
   rightFoot.position.set(0.1, 0, 0.03);
   group.add(rightFoot);
 
+  // Physics rigid body
+  const bodyDesc = rapier.RigidBodyDesc.dynamic()
+    .setTranslation(0, 2, 0)
+    .enabledRotations(false, true, false);
+  const rigidBody = world.createRigidBody(bodyDesc);
+
+  // Capsule collider sized to match the penguin mesh
+  const colliderDesc = rapier.ColliderDesc.capsule(0.5, 0.3);
+  world.createCollider(colliderDesc, rigidBody);
+
   return {
     group,
     parts: {
@@ -95,5 +109,6 @@ export function createPenguin(): { group: THREE.Group; parts: PenguinParts } {
       leftFoot,
       rightFoot,
     },
+    rigidBody,
   };
 }
