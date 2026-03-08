@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { initPhysics } from './physics';
+import { createPenguin } from './player/penguin';
 
 async function startGame() {
   // Initialize physics
@@ -37,6 +38,11 @@ async function startGame() {
   const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
   groundMesh.position.set(0, 0, 0);
   scene.add(groundMesh);
+
+  // Penguin
+  const penguin = createPenguin();
+  penguin.group.position.set(0, 2, 0);
+  scene.add(penguin.group);
 
   // Animation loop
   function animate() {
