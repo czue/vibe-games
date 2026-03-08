@@ -13,6 +13,7 @@ async function startGame() {
 
   // Renderer
   const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -87,8 +88,9 @@ async function startGame() {
     animator.update(delta, controller.isMoving, controller.isGrounded);
 
     // Sync penguin mesh position to physics body
+    // Offset Y by capsule half-extent (0.8) so feet align with ground
     const t = penguin.rigidBody.translation();
-    penguin.group.position.set(t.x, t.y, t.z);
+    penguin.group.position.set(t.x, t.y - 0.8, t.z);
 
     const collectResult = level.checkCollectibles(penguin.group.position);
     if (collectResult) {

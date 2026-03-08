@@ -5,6 +5,7 @@ import type { Level, CollectibleResult } from './level';
 export class BouldersBeach implements Level {
   private waterMesh: THREE.Mesh | null = null;
   private elapsedTime = 0;
+  private shells: { mesh: THREE.Mesh; id: string; collected: boolean }[] = [];
 
   setup(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
     this.createGround(scene, world, rapier);
@@ -12,14 +13,36 @@ export class BouldersBeach implements Level {
     this.createBoundaryWalls(world, rapier);
     this.placeBoulders(scene, world, rapier);
     this.placeBushes(scene);
+
+    // Place collectible shells
+    const shellPositions: [number, number, number][] = [
+      [16, 0.3, 13],    // Behind a large boulder
+      [-17, 0.3, -11],  // Near the water edge
+      [-7, 0.3, 21],    // Among some bushes
+      [23, 0.3, -6],    // In a corner of the map
+      [9, 0.3, -24],    // Near a cluster of boulders
+    ];
+    shellPositions.forEach((pos, i) => {
+      this.createShell(scene, new THREE.Vector3(pos[0], pos[1], pos[2]), `shell-${i}`);
+    });
   }
 
   update(deltaTime: number): void {
     this.elapsedTime += deltaTime;
     this.animateWater();
+    this.animateShells(deltaTime);
   }
 
-  checkCollectibles(_playerPosition: THREE.Vector3): CollectibleResult | null {
+  checkCollectibles(playerPosition: THREE.Vector3): CollectibleResult | null {
+    for (const shell of this.shells) {
+      if (shell.collected) continue;
+      const dist = playerPosition.distanceTo(shell.mesh.position);
+      if (dist < 1.5) {
+        shell.collected = true;
+        shell.mesh.removeFromParent();
+        return { id: shell.id, type: 'shell' };
+      }
+    }
     return null;
   }
 
@@ -199,6 +222,29 @@ export class BouldersBeach implements Level {
 
     for (const p of bushPositions) {
       this.createBush(scene, { x: p.x, y: 0, z: p.z });
+    }
+  }
+
+  private createShell(scene: THREE.Scene, position: THREE.Vector3, id: string): void {
+    const geometry = new THREE.TorusGeometry(0.15, 0.06, 8, 12);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xffd4b8,
+      emissive: 0xffaa66,
+      emissiveIntensity: 0.3,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.scale.set(1, 0.5, 1);
+    mesh.position.copy(position);
+    scene.add(mesh);
+    this.shells.push({ mesh, id, collected: false });
+  }
+
+  private animateShells(deltaTime: number): void {
+    for (let i = 0; i < this.shells.length; i++) {
+      const shell = this.shells[i];
+      if (shell.collected) continue;
+      shell.mesh.rotateY(2 * deltaTime);
+      shell.mesh.position.y = 0.3 + Math.sin(this.elapsedTime * 2 + i) * 0.15;
     }
   }
 

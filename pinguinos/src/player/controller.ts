@@ -13,7 +13,7 @@ export class PlayerController {
 
   private readonly moveSpeed = 5;
   private readonly jumpImpulse = 7;
-  private readonly groundRayThreshold = 0.6;
+  private readonly groundRayThreshold = 1.0;
   private readonly lerpFactor = 0.15;
   private readonly rotationLerpFactor = 0.15;
 
