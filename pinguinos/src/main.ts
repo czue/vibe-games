@@ -5,6 +5,7 @@ import { PlayerController } from './player/controller';
 import { FollowCamera } from './camera';
 import { PenguinAnimator } from './player/animations';
 import { BouldersBeach } from './levels/boulders-beach';
+import { GameUI } from './ui';
 
 async function startGame() {
   // Initialize physics
@@ -65,6 +66,13 @@ async function startGame() {
   // Follow camera
   const followCamera = new FollowCamera(camera, penguin.group);
 
+  // UI
+  const ui = new GameUI();
+  const totalShells = 5;
+  let collectedCount = 0;
+  ui.updateObjective(0, totalShells);
+  ui.fadeControlsHint();
+
   // Delta time tracking
   const clock = new THREE.Clock();
 
@@ -81,6 +89,15 @@ async function startGame() {
     // Sync penguin mesh position to physics body
     const t = penguin.rigidBody.translation();
     penguin.group.position.set(t.x, t.y, t.z);
+
+    const collectResult = level.checkCollectibles(penguin.group.position);
+    if (collectResult) {
+      collectedCount++;
+      ui.updateObjective(collectedCount, totalShells);
+      if (collectedCount >= totalShells) {
+        ui.showCompletion();
+      }
+    }
 
     followCamera.update(delta);
 
