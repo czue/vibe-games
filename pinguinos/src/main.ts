@@ -13,21 +13,33 @@ async function startGame() {
   // Renderer
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
   // Scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87ceeb);
+  scene.fog = new THREE.Fog(0x87ceeb, 50, 120);
 
   // Camera
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, 5, 10);
 
   // Lighting
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(5, 10, 5);
+  const light = new THREE.DirectionalLight(0xfff5e6, 1.5);
+  light.position.set(10, 15, 10);
+  light.castShadow = true;
+  light.shadow.mapSize.width = 2048;
+  light.shadow.mapSize.height = 2048;
+  light.shadow.camera.near = 0.5;
+  light.shadow.camera.far = 100;
+  light.shadow.camera.left = -40;
+  light.shadow.camera.right = 40;
+  light.shadow.camera.top = 40;
+  light.shadow.camera.bottom = -40;
   scene.add(light);
-  scene.add(new THREE.AmbientLight(0x404040));
+  scene.add(new THREE.AmbientLight(0x8899aa, 0.5));
 
   // Level
   const level = new BouldersBeach();
@@ -36,6 +48,13 @@ async function startGame() {
   // Penguin
   const penguin = createPenguin(world, RAPIER);
   scene.add(penguin.group);
+
+  // Enable shadows on penguin meshes
+  penguin.group.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.castShadow = true;
+    }
+  });
 
   // Player controller
   const controller = new PlayerController(penguin.rigidBody, RAPIER, world, penguin.group);

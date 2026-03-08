@@ -40,6 +40,7 @@ export class BouldersBeach implements Level {
     const groundMaterial = new THREE.MeshStandardMaterial({ color: 0xdeb887 });
     const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
     groundMesh.position.set(0, 0, 0);
+    groundMesh.receiveShadow = true;
     scene.add(groundMesh);
 
     // Physics ground: fixed body with cuboid collider
@@ -113,6 +114,8 @@ export class BouldersBeach implements Level {
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(position.x, position.y, position.z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     scene.add(mesh);
 
     const bodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(position.x, position.y, position.z);
