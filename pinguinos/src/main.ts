@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { initPhysics } from './physics';
 import { createPenguin } from './player/penguin';
+import { PlayerController } from './player/controller';
+import { FollowCamera } from './camera';
+import { PenguinAnimator } from './player/animations';
+import { BouldersBeach } from './levels/boulders-beach';
 
 async function startGame() {
   // Initialize physics
@@ -18,7 +22,6 @@ async function startGame() {
   // Camera
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, 5, 10);
-  camera.lookAt(0, 0, 0);
 
   // Lighting
   const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -26,31 +29,41 @@ async function startGame() {
   scene.add(light);
   scene.add(new THREE.AmbientLight(0x404040));
 
-  // Physics ground plane: fixed rigid body with a wide, thin cuboid collider
-  const groundBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
-  const groundBody = world.createRigidBody(groundBodyDesc);
-  const groundColliderDesc = RAPIER.ColliderDesc.cuboid(50, 0.1, 50);
-  world.createCollider(groundColliderDesc, groundBody);
-
-  // Visual ground plane (matches physics collider dimensions)
-  const groundGeometry = new THREE.BoxGeometry(100, 0.2, 100);
-  const groundMaterial = new THREE.MeshStandardMaterial({ color: 0xdeb887 });
-  const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-  groundMesh.position.set(0, 0, 0);
-  scene.add(groundMesh);
+  // Level
+  const level = new BouldersBeach();
+  level.setup(scene, world, RAPIER);
 
   // Penguin
   const penguin = createPenguin(world, RAPIER);
   scene.add(penguin.group);
 
+  // Player controller
+  const controller = new PlayerController(penguin.rigidBody, RAPIER, world, penguin.group);
+
+  // Penguin animator
+  const animator = new PenguinAnimator(penguin.parts);
+
+  // Follow camera
+  const followCamera = new FollowCamera(camera, penguin.group);
+
+  // Delta time tracking
+  const clock = new THREE.Clock();
+
   // Animation loop
   function animate() {
     requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+
     world.step();
+    controller.update(delta);
+    level.update(delta);
+    animator.update(delta, controller.isMoving, controller.isGrounded);
 
     // Sync penguin mesh position to physics body
     const t = penguin.rigidBody.translation();
     penguin.group.position.set(t.x, t.y, t.z);
+
+    followCamera.update(delta);
 
     renderer.render(scene, camera);
   }
