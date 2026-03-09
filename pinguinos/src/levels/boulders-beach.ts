@@ -59,6 +59,10 @@ export class BouldersBeach implements Level {
         this.hasKey = true;
         this.shellKey.removeFromParent();
         this.shellKey = null;
+        if (this.shellKeyLight) {
+          this.shellKeyLight.removeFromParent();
+          this.shellKeyLight = null;
+        }
         return { type: 'key_collected' };
       }
     }
@@ -277,21 +281,28 @@ export class BouldersBeach implements Level {
     }
   }
 
+  private shellKeyLight: THREE.PointLight | null = null;
+
   private createShellKey(scene: THREE.Scene): void {
-    // Shell-shaped key, larger and more prominent than the old collectibles
-    const geometry = new THREE.TorusGeometry(0.25, 0.1, 8, 16);
+    // Shell-shaped key — large, bright, and hard to miss
+    const geometry = new THREE.TorusGeometry(0.4, 0.15, 8, 16);
     const material = new THREE.MeshStandardMaterial({
       color: 0xffd700,
       emissive: 0xffaa00,
-      emissiveIntensity: 0.5,
+      emissiveIntensity: 0.8,
       metalness: 0.6,
       roughness: 0.3,
     });
     this.shellKey = new THREE.Mesh(geometry, material);
     this.shellKey.scale.set(1, 0.6, 1);
-    this.shellKey.position.set(-17, 0.5, -11); // Near the water edge
+    this.shellKey.position.set(-8, 1.0, 15); // Open area, easy to spot
     this.shellKey.castShadow = true;
     scene.add(this.shellKey);
+
+    // Add a glowing point light so it illuminates the area
+    this.shellKeyLight = new THREE.PointLight(0xffd700, 2, 8);
+    this.shellKeyLight.position.copy(this.shellKey.position);
+    scene.add(this.shellKeyLight);
   }
 
   private createLockedBoulder(
@@ -365,7 +376,10 @@ export class BouldersBeach implements Level {
   private animateShellKey(): void {
     if (!this.shellKey) return;
     this.shellKey.rotateY(0.02);
-    this.shellKey.position.y = 0.5 + Math.sin(this.elapsedTime * 2) * 0.15;
+    this.shellKey.position.y = 1.0 + Math.sin(this.elapsedTime * 2) * 0.2;
+    if (this.shellKeyLight) {
+      this.shellKeyLight.position.y = this.shellKey.position.y;
+    }
   }
 
   private animateWater(): void {
