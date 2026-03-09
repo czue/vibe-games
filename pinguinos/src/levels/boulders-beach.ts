@@ -1,49 +1,89 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
-import type { Level, CollectibleResult } from './level';
+import type { Level, LevelEvent } from './level';
 
 export class BouldersBeach implements Level {
   private waterMesh: THREE.Mesh | null = null;
   private elapsedTime = 0;
-  private shells: { mesh: THREE.Mesh; id: string; collected: boolean }[] = [];
+
+  // Shell key
+  private shellKey: THREE.Mesh | null = null;
+  private hasKey = false;
+
+  // Locked boulder
+  private lockedBoulderMesh: THREE.Group | null = null;
+  private lockedBoulderBody: InstanceType<typeof RAPIER.RigidBody> | null = null;
+  private boulderUnlocked = false;
+  private boulderSlideProgress = 0;
+  private boulderStartX = 0;
+  private boulderTargetX = 0;
+  private world: InstanceType<typeof RAPIER.World> | null = null;
+  private rapierRef: typeof RAPIER | null = null;
 
   setup(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
+    this.world = world;
+    this.rapierRef = rapier;
     this.createGround(scene, world, rapier);
     this.createWater(scene);
     this.createBoundaryWalls(world, rapier);
     this.placeBoulders(scene, world, rapier);
     this.placeBushes(scene);
-
-    // Place collectible shells
-    const shellPositions: [number, number, number][] = [
-      [16, 0.3, 13],    // Behind a large boulder
-      [-17, 0.3, -11],  // Near the water edge
-      [-7, 0.3, 21],    // Among some bushes
-      [23, 0.3, -6],    // In a corner of the map
-      [9, 0.3, -24],    // Near a cluster of boulders
-    ];
-    shellPositions.forEach((pos, i) => {
-      this.createShell(scene, new THREE.Vector3(pos[0], pos[1], pos[2]), `shell-${i}`);
-    });
+    this.createShellKey(scene);
+    this.createLockedBoulder(scene, world, rapier);
   }
 
-  update(deltaTime: number): void {
+  update(deltaTime: number, playerPosition: THREE.Vector3): LevelEvent | null {
     this.elapsedTime += deltaTime;
     this.animateWater();
-    this.animateShells(deltaTime);
-  }
+    this.animateShellKey();
 
-  checkCollectibles(playerPosition: THREE.Vector3): CollectibleResult | null {
-    for (const shell of this.shells) {
-      if (shell.collected) continue;
-      const dist = playerPosition.distanceTo(shell.mesh.position);
-      if (dist < 1.5) {
-        shell.collected = true;
-        shell.mesh.removeFromParent();
-        return { id: shell.id, type: 'shell' };
+    // Animate boulder sliding
+    if (this.boulderUnlocked && this.boulderSlideProgress < 1) {
+      this.boulderSlideProgress = Math.min(1, this.boulderSlideProgress + deltaTime * 0.5);
+      const t = this.easeOutCubic(this.boulderSlideProgress);
+      const newX = this.boulderStartX + (this.boulderTargetX - this.boulderStartX) * t;
+      if (this.lockedBoulderMesh) {
+        this.lockedBoulderMesh.position.x = newX;
+      }
+      // Move the physics body too
+      if (this.lockedBoulderBody) {
+        const pos = this.lockedBoulderBody.translation();
+        this.lockedBoulderBody.setTranslation({ x: newX, y: pos.y, z: pos.z }, true);
       }
     }
+
+    // Check key pickup
+    if (!this.hasKey && this.shellKey) {
+      const dist = playerPosition.distanceTo(this.shellKey.position);
+      if (dist < 1.5) {
+        this.hasKey = true;
+        this.shellKey.removeFromParent();
+        this.shellKey = null;
+        return { type: 'key_collected' };
+      }
+    }
+
+    // Check boulder interaction
+    if (this.hasKey && !this.boulderUnlocked && this.lockedBoulderMesh) {
+      const dist = playerPosition.distanceTo(this.lockedBoulderMesh.position);
+      if (dist < 3.0) {
+        this.boulderUnlocked = true;
+        // Remove the keyhole marker
+        const keyhole = this.lockedBoulderMesh.getObjectByName('keyhole');
+        if (keyhole) keyhole.removeFromParent();
+        return { type: 'boulder_unlocked' };
+      }
+    }
+
     return null;
+  }
+
+  isComplete(): boolean {
+    return this.boulderUnlocked && this.boulderSlideProgress >= 1;
+  }
+
+  private easeOutCubic(t: number): number {
+    return 1 - Math.pow(1 - t, 3);
   }
 
   private createGround(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
@@ -237,27 +277,95 @@ export class BouldersBeach implements Level {
     }
   }
 
-  private createShell(scene: THREE.Scene, position: THREE.Vector3, id: string): void {
-    const geometry = new THREE.TorusGeometry(0.15, 0.06, 8, 12);
+  private createShellKey(scene: THREE.Scene): void {
+    // Shell-shaped key, larger and more prominent than the old collectibles
+    const geometry = new THREE.TorusGeometry(0.25, 0.1, 8, 16);
     const material = new THREE.MeshStandardMaterial({
-      color: 0xffd4b8,
-      emissive: 0xffaa66,
-      emissiveIntensity: 0.3,
+      color: 0xffd700,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.5,
+      metalness: 0.6,
+      roughness: 0.3,
     });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.scale.set(1, 0.5, 1);
-    mesh.position.copy(position);
-    scene.add(mesh);
-    this.shells.push({ mesh, id, collected: false });
+    this.shellKey = new THREE.Mesh(geometry, material);
+    this.shellKey.scale.set(1, 0.6, 1);
+    this.shellKey.position.set(-17, 0.5, -11); // Near the water edge
+    this.shellKey.castShadow = true;
+    scene.add(this.shellKey);
   }
 
-  private animateShells(deltaTime: number): void {
-    for (let i = 0; i < this.shells.length; i++) {
-      const shell = this.shells[i];
-      if (shell.collected) continue;
-      shell.mesh.rotateY(2 * deltaTime);
-      shell.mesh.position.y = 0.3 + Math.sin(this.elapsedTime * 2 + i) * 0.15;
+  private createLockedBoulder(
+    scene: THREE.Scene,
+    world: InstanceType<typeof RAPIER.World>,
+    rapier: typeof RAPIER
+  ): void {
+    const group = new THREE.Group();
+    const size = 2.8;
+
+    // Boulder mesh
+    const geometry = new THREE.IcosahedronGeometry(size, 2);
+    const positionAttr = geometry.getAttribute('position');
+    const displacementMap = new Map<string, number>();
+    for (let i = 0; i < positionAttr.count; i++) {
+      const x = positionAttr.getX(i);
+      const y = positionAttr.getY(i);
+      const z = positionAttr.getZ(i);
+      const key = `${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)}`;
+      if (!displacementMap.has(key)) {
+        displacementMap.set(key, 0.85 + Math.random() * 0.3);
+      }
+      const scale = displacementMap.get(key)!;
+      positionAttr.setX(i, x * scale);
+      positionAttr.setY(i, y * scale);
+      positionAttr.setZ(i, z * scale);
     }
+    positionAttr.needsUpdate = true;
+    geometry.computeVertexNormals();
+
+    const boulderMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+      color: 0x6a5a4a,
+      roughness: 0.9,
+      metalness: 0.1,
+    }));
+    boulderMesh.castShadow = true;
+    boulderMesh.receiveShadow = true;
+    group.add(boulderMesh);
+
+    // Keyhole marker — a golden torus on the front face
+    const keyholeGeo = new THREE.TorusGeometry(0.3, 0.08, 8, 16);
+    const keyholeMat = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.4,
+      metalness: 0.7,
+      roughness: 0.2,
+    });
+    const keyhole = new THREE.Mesh(keyholeGeo, keyholeMat);
+    keyhole.name = 'keyhole';
+    keyhole.position.set(0, 0.3, size * 0.95); // On the front surface
+    group.add(keyhole);
+
+    // Position the locked boulder — blocking a path area
+    const boulderX = 10;
+    const boulderZ = 5;
+    group.position.set(boulderX, size * 0.5, boulderZ);
+    this.boulderStartX = boulderX;
+    this.boulderTargetX = boulderX + 8; // Slide 8 units to the right
+    scene.add(group);
+    this.lockedBoulderMesh = group;
+
+    // Physics body
+    const bodyDesc = rapier.RigidBodyDesc.kinematicPositionBased()
+      .setTranslation(boulderX, size * 0.5, boulderZ);
+    this.lockedBoulderBody = world.createRigidBody(bodyDesc);
+    const colliderDesc = rapier.ColliderDesc.ball(size);
+    world.createCollider(colliderDesc, this.lockedBoulderBody);
+  }
+
+  private animateShellKey(): void {
+    if (!this.shellKey) return;
+    this.shellKey.rotateY(0.02);
+    this.shellKey.position.y = 0.5 + Math.sin(this.elapsedTime * 2) * 0.15;
   }
 
   private animateWater(): void {

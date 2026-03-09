@@ -9,8 +9,8 @@ export class GameUI {
     this.completionEl = document.getElementById('completion')!;
   }
 
-  updateObjective(collected: number, total: number): void {
-    this.objectiveEl.textContent = `Shells: ${collected}/${total}`;
+  setObjective(text: string): void {
+    this.objectiveEl.textContent = text;
   }
 
   showCompletion(): void {

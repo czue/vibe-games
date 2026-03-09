@@ -69,9 +69,7 @@ async function startGame() {
 
   // UI
   const ui = new GameUI();
-  const totalShells = 5;
-  let collectedCount = 0;
-  ui.updateObjective(0, totalShells);
+  ui.setObjective('Find the shell key');
   ui.fadeControlsHint();
 
   // Delta time tracking
@@ -84,22 +82,23 @@ async function startGame() {
 
     world.step();
     controller.update(delta);
-    level.update(delta);
-    animator.update(delta, controller.isMoving, controller.isGrounded);
 
     // Sync penguin mesh position to physics body
     // Offset Y by capsule half-extent (0.8) so feet align with ground
     const t = penguin.rigidBody.translation();
     penguin.group.position.set(t.x, t.y - 0.8, t.z);
 
-    const collectResult = level.checkCollectibles(penguin.group.position);
-    if (collectResult) {
-      collectedCount++;
-      ui.updateObjective(collectedCount, totalShells);
-      if (collectedCount >= totalShells) {
+    const event = level.update(delta, penguin.group.position);
+    if (event) {
+      if (event.type === 'key_collected') {
+        ui.setObjective('Bring the key to the golden boulder');
+      } else if (event.type === 'boulder_unlocked') {
+        ui.setObjective('');
         ui.showCompletion();
       }
     }
+
+    animator.update(delta, controller.isMoving, controller.isGrounded);
 
     followCamera.update(delta);
 
