@@ -70,7 +70,7 @@ export class BouldersBeach implements Level {
     // Check boulder interaction
     if (this.hasKey && !this.boulderUnlocked && this.lockedBoulderMesh) {
       const dist = playerPosition.distanceTo(this.lockedBoulderMesh.position);
-      if (dist < 3.0) {
+      if (dist < 5.0) {
         this.boulderUnlocked = true;
         // Remove the keyhole marker
         const keyhole = this.lockedBoulderMesh.getObjectByName('keyhole');
