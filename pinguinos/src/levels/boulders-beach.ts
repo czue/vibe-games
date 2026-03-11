@@ -20,6 +20,12 @@ export class BouldersBeach implements Level {
   private world: InstanceType<typeof RAPIER.World> | null = null;
   private rapierRef: typeof RAPIER | null = null;
 
+  // Portal
+  private portalMesh: THREE.Group | null = null;
+  private portalLight: THREE.PointLight | null = null;
+  private portalEntered = false;
+  private portalPosition = new THREE.Vector3(10, 0, 5);
+
   setup(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
     this.world = world;
     this.rapierRef = rapier;
@@ -29,6 +35,7 @@ export class BouldersBeach implements Level {
     this.placeBoulders(scene, world, rapier);
     this.placeBushes(scene);
     this.createShellKey(scene);
+    this.createPortal(scene);
     this.createLockedBoulder(scene, world, rapier);
   }
 
@@ -76,6 +83,23 @@ export class BouldersBeach implements Level {
         const keyhole = this.lockedBoulderMesh.getObjectByName('keyhole');
         if (keyhole) keyhole.removeFromParent();
         return { type: 'boulder_unlocked' };
+      }
+    }
+
+    // Animate portal
+    if (this.portalMesh) {
+      this.portalMesh.rotation.y = this.elapsedTime * 1.5;
+      if (this.portalLight) {
+        this.portalLight.intensity = 3 + Math.sin(this.elapsedTime * 3) * 1;
+      }
+    }
+
+    // Check portal entry (only after boulder has fully slid away)
+    if (this.boulderUnlocked && this.boulderSlideProgress >= 1 && !this.portalEntered) {
+      const dist = playerPosition.distanceTo(this.portalPosition);
+      if (dist < 1.8) {
+        this.portalEntered = true;
+        return { type: 'portal_entered' };
       }
     }
 
@@ -371,6 +395,58 @@ export class BouldersBeach implements Level {
     this.lockedBoulderBody = world.createRigidBody(bodyDesc);
     const colliderDesc = rapier.ColliderDesc.ball(size);
     world.createCollider(colliderDesc, this.lockedBoulderBody);
+  }
+
+  private createPortal(scene: THREE.Scene): void {
+    const group = new THREE.Group();
+
+    // Outer ring — glowing purple/blue
+    const ringGeo = new THREE.TorusGeometry(1.2, 0.15, 8, 32);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0x6644cc,
+      emissive: 0x4422aa,
+      emissiveIntensity: 0.8,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2; // Lay flat
+    group.add(ring);
+
+    // Inner swirl — semi-transparent disc
+    const discGeo = new THREE.CircleGeometry(1.1, 32);
+    const discMat = new THREE.MeshStandardMaterial({
+      color: 0x8866ff,
+      emissive: 0x6644dd,
+      emissiveIntensity: 1.0,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+    });
+    const disc = new THREE.Mesh(discGeo, discMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.01;
+    group.add(disc);
+
+    // Second smaller ring for depth
+    const innerRingGeo = new THREE.TorusGeometry(0.7, 0.1, 8, 24);
+    const innerRingMat = new THREE.MeshStandardMaterial({
+      color: 0xaa88ff,
+      emissive: 0x8866dd,
+      emissiveIntensity: 1.0,
+    });
+    const innerRing = new THREE.Mesh(innerRingGeo, innerRingMat);
+    innerRing.rotation.x = -Math.PI / 2;
+    innerRing.position.y = 0.02;
+    group.add(innerRing);
+
+    group.position.copy(this.portalPosition);
+    group.position.y = 0.05; // Just above ground
+    scene.add(group);
+    this.portalMesh = group;
+
+    // Portal glow light
+    this.portalLight = new THREE.PointLight(0x8866ff, 3, 10);
+    this.portalLight.position.set(this.portalPosition.x, 1, this.portalPosition.z);
+    scene.add(this.portalLight);
   }
 
   private animateShellKey(): void {

@@ -14,7 +14,7 @@ export class GameUI {
   }
 
   showCompletion(): void {
-    this.completionEl.style.display = 'block';
+    this.completionEl.style.display = 'flex';
   }
 
   fadeControlsHint(): void {

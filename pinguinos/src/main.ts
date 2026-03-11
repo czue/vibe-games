@@ -75,13 +75,21 @@ async function startGame() {
   // Delta time tracking
   const clock = new THREE.Clock();
 
+  // Portal fall state
+  let enteringPortal = false;
+  let portalFallProgress = 0;
+  let controlsDisabled = false;
+
   // Animation loop
   function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
     world.step();
-    controller.update(delta);
+
+    if (!controlsDisabled) {
+      controller.update(delta);
+    }
 
     // Sync penguin mesh position to physics body
     // Offset Y by capsule half-extent (0.8) so feet align with ground
@@ -93,7 +101,35 @@ async function startGame() {
       if (event.type === 'key_collected') {
         ui.setObjective('Bring the key to the golden boulder');
       } else if (event.type === 'boulder_unlocked') {
-        ui.setObjective('');
+        ui.setObjective('Enter the portal...');
+      } else if (event.type === 'portal_entered') {
+        enteringPortal = true;
+        controlsDisabled = true;
+        // Stop the penguin's physics movement
+        penguin.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        penguin.rigidBody.setGravityScale(0, true);
+      }
+    }
+
+    // Animate portal fall
+    if (enteringPortal) {
+      portalFallProgress += delta;
+
+      // Spin and shrink the penguin as it falls in
+      penguin.group.rotation.y += delta * 8;
+      const shrink = Math.max(0, 1 - portalFallProgress * 0.8);
+      penguin.group.scale.set(shrink, shrink, shrink);
+
+      // Pull penguin down
+      const pos = penguin.rigidBody.translation();
+      penguin.rigidBody.setTranslation(
+        { x: pos.x, y: pos.y - delta * 3, z: pos.z },
+        true,
+      );
+
+      // After falling for ~1.5 seconds, show level complete
+      if (portalFallProgress > 1.5) {
+        enteringPortal = false;
         ui.showCompletion();
       }
     }

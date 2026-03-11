@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 
 export interface LevelEvent {
-  type: 'key_collected' | 'boulder_unlocked';
+  type: 'key_collected' | 'boulder_unlocked' | 'portal_entered';
 }
 
 export interface Level {

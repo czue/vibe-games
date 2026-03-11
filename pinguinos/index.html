@@ -35,11 +35,24 @@
     #completion {
       display: none;
       position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 48px;
-      text-align: center;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+    }
+    #completion h1 {
+      font-size: 56px;
+      margin: 0;
+    }
+    #completion p {
+      font-size: 24px;
+      opacity: 0.8;
+      margin: 0;
     }
   </style>
 </head>
@@ -47,7 +60,10 @@
   <div id="ui">
     <div id="objective"></div>
     <div id="controls-hint">WASD to move, Space to jump</div>
-    <div id="completion">The path is open!</div>
+    <div id="completion">
+      <h1>Level Complete!</h1>
+      <p>The penguin found its way through Boulders Beach</p>
+    </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
