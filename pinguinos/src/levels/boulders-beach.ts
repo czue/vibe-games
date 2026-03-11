@@ -24,7 +24,7 @@ export class BouldersBeach implements Level {
   private portalMesh: THREE.Group | null = null;
   private portalLight: THREE.PointLight | null = null;
   private portalEntered = false;
-  private portalPosition = new THREE.Vector3(10, 0, 5);
+  private portalPosition = new THREE.Vector3(10, 0, 10);
 
   setup(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
     this.world = world;
@@ -115,59 +115,80 @@ export class BouldersBeach implements Level {
   }
 
   private createGround(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
-    // Visual ground with slight undulation
-    const groundGeometry = new THREE.PlaneGeometry(80, 80, 40, 40);
-    groundGeometry.rotateX(-Math.PI / 2);
+    // Sand ground — covers the +Z half (the beach)
+    const sandGeometry = new THREE.PlaneGeometry(80, 50, 40, 25);
+    sandGeometry.rotateX(-Math.PI / 2);
 
-    // Perturb vertex Y positions for undulation
-    const positionAttr = groundGeometry.getAttribute('position');
-    for (let i = 0; i < positionAttr.count; i++) {
-      const y = positionAttr.getY(i);
-      positionAttr.setY(i, y + (Math.random() - 0.5) * 0.2);
+    // Gentle undulation
+    const sandPos = sandGeometry.getAttribute('position');
+    for (let i = 0; i < sandPos.count; i++) {
+      const y = sandPos.getY(i);
+      const z = sandPos.getZ(i);
+      // Slope down slightly toward the water edge (negative Z in local space)
+      const slopeDown = Math.max(0, (-z - 15) * 0.03);
+      sandPos.setY(i, y + (Math.random() - 0.5) * 0.15 - slopeDown);
     }
-    positionAttr.needsUpdate = true;
-    groundGeometry.computeVertexNormals();
+    sandPos.needsUpdate = true;
+    sandGeometry.computeVertexNormals();
 
-    const groundMaterial = new THREE.MeshStandardMaterial({ color: 0xdeb887 });
-    const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-    groundMesh.position.set(0, 0, 0);
-    groundMesh.receiveShadow = true;
-    scene.add(groundMesh);
+    const sandMaterial = new THREE.MeshStandardMaterial({ color: 0xdeb887 });
+    const sandMesh = new THREE.Mesh(sandGeometry, sandMaterial);
+    sandMesh.position.set(0, 0, 15); // Offset toward +Z
+    sandMesh.receiveShadow = true;
+    scene.add(sandMesh);
 
-    // Physics ground: fixed body with cuboid collider
-    const groundBodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
+    // Wet sand strip along the shoreline
+    const wetSandGeo = new THREE.PlaneGeometry(80, 8, 40, 4);
+    wetSandGeo.rotateX(-Math.PI / 2);
+    const wetSandMat = new THREE.MeshStandardMaterial({ color: 0xc4a56e });
+    const wetSandMesh = new THREE.Mesh(wetSandGeo, wetSandMat);
+    wetSandMesh.position.set(0, -0.02, -6); // At shoreline
+    wetSandMesh.receiveShadow = true;
+    scene.add(wetSandMesh);
+
+    // Physics ground: covers the walkable sand area
+    const groundBodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(0, -0.1, 10);
     const groundBody = world.createRigidBody(groundBodyDesc);
-    const groundColliderDesc = rapier.ColliderDesc.cuboid(40, 0.1, 40);
+    const groundColliderDesc = rapier.ColliderDesc.cuboid(40, 0.1, 30);
     world.createCollider(groundColliderDesc, groundBody);
   }
 
   private createWater(scene: THREE.Scene): void {
-    const waterGeometry = new THREE.PlaneGeometry(80, 30, 40, 20);
+    // Large water plane covering the -Z half
+    const waterGeometry = new THREE.PlaneGeometry(80, 50, 40, 25);
     waterGeometry.rotateX(-Math.PI / 2);
 
     const waterMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4488cc,
-      opacity: 0.7,
+      color: 0x2277bb,
+      opacity: 0.8,
       transparent: true,
     });
 
     this.waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
-    this.waterMesh.position.set(0, -0.2, -25);
+    this.waterMesh.position.set(0, -0.4, -25); // Water is below ground level
     scene.add(this.waterMesh);
+
+    // Ocean floor underneath the water (dark sand)
+    const floorGeo = new THREE.PlaneGeometry(80, 50);
+    floorGeo.rotateX(-Math.PI / 2);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x8b7355 });
+    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    floorMesh.position.set(0, -1.5, -25);
+    scene.add(floorMesh);
   }
 
   private createBoundaryWalls(world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
     const wallPositions: [number, number, number][] = [
-      [35, 5, 0],   // +X wall
-      [-35, 5, 0],  // -X wall
-      [0, 5, 35],   // +Z wall
-      [0, 5, -35],  // -Z wall
+      [35, 5, 15],   // +X wall
+      [-35, 5, 15],  // -X wall
+      [0, 5, 35],    // +Z wall (back of beach)
+      [0, 5, -8],    // -Z wall (shoreline — keep penguin out of water)
     ];
 
     const wallSizes: [number, number, number][] = [
-      [0.1, 5, 35],  // X walls: thin in X, tall, wide in Z
-      [0.1, 5, 35],
-      [35, 5, 0.1],  // Z walls: wide in X, tall, thin in Z
+      [0.1, 5, 25],  // X walls: narrower to match sand area
+      [0.1, 5, 25],
+      [35, 5, 0.1],  // Z walls
       [35, 5, 0.1],
     ];
 
@@ -233,27 +254,26 @@ export class BouldersBeach implements Level {
     rapier: typeof RAPIER
   ): void {
     const boulderPlacements: { x: number; z: number; size: number }[] = [
-      // Cluster near top-right
-      { x: 15, z: 12, size: 2.0 },
-      { x: 17, z: 14, size: 1.5 },
-      { x: 13, z: 15, size: 1.0 },
-      { x: 16, z: 10, size: 0.7 },
-      // Cluster near bottom-left
-      { x: -18, z: -10, size: 2.5 },
-      { x: -15, z: -12, size: 1.8 },
-      { x: -20, z: -8, size: 1.2 },
-      // Scattered mid-field
-      { x: -8, z: 20, size: 1.4 },
-      { x: 5, z: -18, size: 1.6 },
-      { x: 22, z: -5, size: 2.2 },
-      { x: -25, z: 5, size: 0.8 },
-      { x: 10, z: -25, size: 1.0 },
-      { x: -5, z: 25, size: 0.5 },
-      // A few more scattered
-      { x: 25, z: 20, size: 1.3 },
-      { x: -12, z: 8, size: 0.9 },
-      { x: 8, z: 8, size: 0.6 },
-      { x: -22, z: -22, size: 1.7 },
+      // Cluster near right side of beach
+      { x: 15, z: 18, size: 2.0 },
+      { x: 17, z: 20, size: 1.5 },
+      { x: 13, z: 22, size: 1.0 },
+      { x: 16, z: 15, size: 0.7 },
+      // Cluster near left side
+      { x: -18, z: 8, size: 2.5 },
+      { x: -15, z: 6, size: 1.8 },
+      { x: -20, z: 10, size: 1.2 },
+      // Along the shoreline (partially in wet sand)
+      { x: -8, z: -2, size: 1.4 },
+      { x: 5, z: -3, size: 1.6 },
+      { x: 22, z: 0, size: 2.2 },
+      { x: -25, z: 2, size: 0.8 },
+      // Scattered across the beach
+      { x: -5, z: 28, size: 0.5 },
+      { x: 25, z: 25, size: 1.3 },
+      { x: -12, z: 15, size: 0.9 },
+      { x: 8, z: 12, size: 0.6 },
+      { x: -22, z: 20, size: 1.7 },
     ];
 
     for (const b of boulderPlacements) {
@@ -283,21 +303,21 @@ export class BouldersBeach implements Level {
   private placeBushes(scene: THREE.Scene): void {
     const bushPositions: { x: number; z: number }[] = [
       // Near boulder clusters
-      { x: 14, z: 16 },
-      { x: 18, z: 11 },
-      { x: -16, z: -13 },
-      { x: -21, z: -7 },
-      // Along edges
-      { x: 28, z: 15 },
-      { x: -28, z: 10 },
-      { x: 20, z: -28 },
-      { x: -10, z: 28 },
-      // Scattered
-      { x: -6, z: 22 },
-      { x: 12, z: -20 },
-      { x: 24, z: -8 },
-      { x: -14, z: 6 },
-      { x: 6, z: 10 },
+      { x: 14, z: 23 },
+      { x: 18, z: 16 },
+      { x: -16, z: 7 },
+      { x: -21, z: 11 },
+      // Along back edge of beach
+      { x: 28, z: 30 },
+      { x: -28, z: 25 },
+      { x: 20, z: 32 },
+      { x: -10, z: 30 },
+      // Scattered on beach
+      { x: -6, z: 18 },
+      { x: 12, z: 10 },
+      { x: 24, z: 5 },
+      { x: -14, z: 14 },
+      { x: 6, z: 20 },
     ];
 
     for (const p of bushPositions) {
@@ -319,7 +339,7 @@ export class BouldersBeach implements Level {
     });
     this.shellKey = new THREE.Mesh(geometry, material);
     this.shellKey.scale.set(1, 0.6, 1);
-    this.shellKey.position.set(-8, 1.0, 15); // Open area, easy to spot
+    this.shellKey.position.set(-8, 1.0, 20); // Open area on the beach, easy to spot
     this.shellKey.castShadow = true;
     scene.add(this.shellKey);
 
@@ -382,7 +402,7 @@ export class BouldersBeach implements Level {
 
     // Position the locked boulder — blocking a path area
     const boulderX = 10;
-    const boulderZ = 5;
+    const boulderZ = 10;
     group.position.set(boulderX, size * 0.5, boulderZ);
     this.boulderStartX = boulderX;
     this.boulderTargetX = boulderX + 8; // Slide 8 units to the right
@@ -465,10 +485,13 @@ export class BouldersBeach implements Level {
     for (let i = 0; i < positionAttr.count; i++) {
       const x = positionAttr.getX(i);
       const z = positionAttr.getZ(i);
-      const y = Math.sin(x * 0.3 + this.elapsedTime * 2) * 0.1 +
-                Math.sin(z * 0.4 + this.elapsedTime * 1.5) * 0.08;
+      // Gentle rolling waves
+      const y = Math.sin(x * 0.15 + this.elapsedTime * 1.2) * 0.15 +
+                Math.sin(z * 0.2 + this.elapsedTime * 0.8) * 0.1 +
+                Math.sin((x + z) * 0.1 + this.elapsedTime * 0.5) * 0.05;
       positionAttr.setY(i, y);
     }
     positionAttr.needsUpdate = true;
+    this.waterMesh.geometry.computeVertexNormals();
   }
 }
