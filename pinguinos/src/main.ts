@@ -46,14 +46,26 @@ async function startGame() {
   const ambientLight = new THREE.AmbientLight(0x8899aa, 0.5);
   scene.add(ambientLight);
 
-  // Level
-  let currentLevelIndex = 0;
+  // Level — check URL param for starting level (e.g. ?level=2)
+  const urlParams = new URLSearchParams(window.location.search);
+  const startLevel = Math.max(0, (parseInt(urlParams.get('level') ?? '1', 10) - 1));
+
+  let currentLevelIndex = startLevel;
   const levels: Level[] = [new BouldersBeach(), new PillarMaze()];
   let level = levels[currentLevelIndex];
+
+  // For level 2+, remove default level-1 lighting (level 2 adds its own)
+  if (currentLevelIndex > 0) {
+    scene.remove(sunLight);
+    scene.remove(ambientLight);
+  }
+
   level.setup(scene, world, RAPIER);
 
   // Penguin
+  const spawn = level.getSpawnPosition?.() ?? { x: 0, y: 2, z: 0 };
   let penguin = createPenguin(world, RAPIER);
+  penguin.rigidBody.setTranslation({ x: spawn.x, y: spawn.y, z: spawn.z }, true);
   scene.add(penguin.group);
   penguin.group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -68,7 +80,11 @@ async function startGame() {
 
   // UI
   const ui = new GameUI();
-  ui.setObjective('Find the shell key');
+  const levelObjectives: Record<number, string> = {
+    0: 'Find the shell key',
+    1: 'Climb the pillars!',
+  };
+  ui.setObjective(levelObjectives[currentLevelIndex] ?? '');
   ui.fadeControlsHint();
 
   // Fade overlay
