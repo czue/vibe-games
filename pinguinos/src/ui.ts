@@ -2,11 +2,13 @@ export class GameUI {
   private objectiveEl: HTMLElement;
   private controlsHintEl: HTMLElement;
   private completionEl: HTMLElement;
+  private wakeUpEl: HTMLElement;
 
   constructor() {
     this.objectiveEl = document.getElementById('objective')!;
     this.controlsHintEl = document.getElementById('controls-hint')!;
     this.completionEl = document.getElementById('completion')!;
+    this.wakeUpEl = document.getElementById('wake-up')!;
   }
 
   setObjective(text: string): void {
@@ -15,6 +17,14 @@ export class GameUI {
 
   showCompletion(): void {
     this.completionEl.style.display = 'flex';
+  }
+
+  hideCompletion(): void {
+    this.completionEl.style.display = 'none';
+  }
+
+  showWakeUp(): void {
+    this.wakeUpEl.style.display = 'flex';
   }
 
   fadeControlsHint(): void {

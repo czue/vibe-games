@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 export class FollowCamera {
   private camera: THREE.PerspectiveCamera;
-  private target: THREE.Group;
+  target: THREE.Group;
   offset: THREE.Vector3;
   private lagFactor: number;
 
