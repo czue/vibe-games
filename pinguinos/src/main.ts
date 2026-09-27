@@ -6,8 +6,10 @@ import { FollowCamera } from './camera';
 import { PenguinAnimator } from './player/animations';
 import { BouldersBeach } from './levels/boulders-beach';
 import { PillarMaze } from './levels/pillar-maze';
+import { SkyPlatforms } from './levels/sky-platforms';
 import { GameUI } from './ui';
 import type { Level } from './levels/level';
+import * as sounds from './sounds';
 
 async function startGame() {
   // Initialize physics
@@ -51,7 +53,7 @@ async function startGame() {
   const startLevel = Math.max(0, (parseInt(urlParams.get('level') ?? '1', 10) - 1));
 
   let currentLevelIndex = startLevel;
-  const levels: Level[] = [new BouldersBeach(), new PillarMaze()];
+  const levels: Level[] = [new BouldersBeach(), new PillarMaze(), new SkyPlatforms()];
   let level = levels[currentLevelIndex];
 
   // For level 2+, remove default level-1 lighting (level 2 adds its own)
@@ -77,12 +79,17 @@ async function startGame() {
   let controller = new PlayerController(penguin.rigidBody, RAPIER, world, penguin.group);
   const animator = new PenguinAnimator(penguin.parts);
   const followCamera = new FollowCamera(camera, penguin.group);
+  if (currentLevelIndex > 0) {
+    followCamera.setFollowRotation(true);
+    controller.setTankControls(true);
+  }
 
   // UI
   const ui = new GameUI();
   const levelObjectives: Record<number, string> = {
     0: 'Find the shell key',
     1: 'Climb the pillars!',
+    2: 'Reach the summit! (Try pressing jump again in the air!)',
   };
   ui.setObjective(levelObjectives[currentLevelIndex] ?? '');
   ui.fadeControlsHint();
@@ -103,6 +110,10 @@ async function startGame() {
   let earthquakeActive = false;
   let faintActive = false;
   let faintProgress = 0;
+
+  // Sound state
+  let wasGrounded = true;
+  let waddleTimer = 0;
 
   // --- Level transition ---
   async function transitionToLevel(nextIndex: number) {
@@ -142,6 +153,8 @@ async function startGame() {
     // Recreate controller
     controller = new PlayerController(penguin.rigidBody, RAPIER, world, penguin.group);
     followCamera.target = penguin.group;
+    followCamera.setFollowRotation(nextIndex > 0);
+    controller.setTankControls(nextIndex > 0);
 
     // Reset state
     enteringPortal = false;
@@ -149,10 +162,8 @@ async function startGame() {
     penguin.group.scale.set(1, 1, 1);
 
     // Level-specific UI
-    if (nextIndex === 1) {
-      ui.setObjective('Climb the pillars!');
-      ui.hideCompletion();
-    }
+    ui.setObjective(levelObjectives[nextIndex] ?? '');
+    ui.hideCompletion();
 
     // Fade back in
     fadeOverlay.style.opacity = '0';
@@ -160,6 +171,52 @@ async function startGame() {
 
     controlsDisabled = false;
     transitioningLevel = false;
+  }
+
+  // Cloud poof particles for air jumps
+  const cloudPoofs: { mesh: THREE.Mesh; life: number; maxLife: number; vel: THREE.Vector3 }[] = [];
+
+  function spawnCloudPoof(s: THREE.Scene, pos: THREE.Vector3) {
+    for (let i = 0; i < 6; i++) {
+      const size = 0.2 + Math.random() * 0.3;
+      const geo = new THREE.SphereGeometry(size, 6, 6);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.7,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(pos);
+      mesh.position.y -= 0.3;
+      s.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 1.5;
+      cloudPoofs.push({
+        mesh,
+        life: 0,
+        maxLife: 0.4 + Math.random() * 0.2,
+        vel: new THREE.Vector3(Math.cos(angle) * speed, -0.5 + Math.random() * 0.5, Math.sin(angle) * speed),
+      });
+    }
+  }
+
+  function updateCloudPoofs(delta: number) {
+    for (let i = cloudPoofs.length - 1; i >= 0; i--) {
+      const p = cloudPoofs[i];
+      p.life += delta;
+      const t = p.life / p.maxLife;
+      p.mesh.position.add(p.vel.clone().multiplyScalar(delta));
+      const scale = 1 + t * 1.5;
+      p.mesh.scale.set(scale, scale, scale);
+      (p.mesh.material as THREE.MeshStandardMaterial).opacity = 0.7 * (1 - t);
+      if (t >= 1) {
+        p.mesh.removeFromParent();
+        p.mesh.geometry.dispose();
+        (p.mesh.material as THREE.MeshStandardMaterial).dispose();
+        cloudPoofs.splice(i, 1);
+      }
+    }
   }
 
   // Animation loop
@@ -188,15 +245,18 @@ async function startGame() {
         // Level 1 events
         case 'key_collected':
           ui.setObjective('Bring the key to the golden boulder');
+          sounds.playKeyPickup();
           break;
         case 'boulder_unlocked':
           ui.setObjective('Enter the portal...');
+          sounds.playBoulderSlide();
           break;
         case 'portal_entered':
           enteringPortal = true;
           controlsDisabled = true;
           penguin.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
           penguin.rigidBody.setGravityScale(0, true);
+          sounds.playPortalEnter();
           break;
 
         // Level 2 events
@@ -208,10 +268,17 @@ async function startGame() {
           earthquakeActive = true;
           penguin.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
           ui.setObjective('');
+          sounds.playEarthquake();
           break;
         case 'cutscene_done':
           faintActive = true;
           faintProgress = 0;
+          break;
+
+        // Level 3 events
+        case 'reached_summit':
+          ui.showCompletion();
+          controlsDisabled = true;
           break;
       }
     }
@@ -254,11 +321,138 @@ async function startGame() {
       }
     }
 
+    // Jump and landing sounds + cloud poof
+    if (!controlsDisabled) {
+      if (controller.didJump) {
+        if (controller.isAirJump) {
+          sounds.playAirJump();
+          spawnCloudPoof(scene, penguin.group.position);
+        } else {
+          sounds.playJump();
+        }
+      }
+      if (!wasGrounded && controller.isGrounded) {
+        sounds.playLand();
+      }
+      wasGrounded = controller.isGrounded;
+
+      // Waddle footstep sounds
+      if (controller.isMoving && controller.isGrounded) {
+        waddleTimer += delta;
+        if (waddleTimer > 0.22) {
+          sounds.playWaddleStep();
+          waddleTimer = 0;
+        }
+      } else {
+        waddleTimer = 0;
+      }
+    }
+
+    updateCloudPoofs(delta);
     animator.update(delta, controller.isMoving, controller.isGrounded);
     followCamera.update(delta);
     renderer.render(scene, camera);
   }
   animate();
+
+  // --- Quicksave / Quickload ---
+  function quickSave() {
+    const pos = penguin.rigidBody.translation();
+    const save = {
+      level: currentLevelIndex,
+      x: pos.x,
+      y: pos.y,
+      z: pos.z,
+      rotationY: penguin.group.rotation.y,
+    };
+    localStorage.setItem('pinguinos_save', JSON.stringify(save));
+    ui.showSaveIndicator();
+    sounds.playSave();
+  }
+
+  async function quickLoad() {
+    const raw = localStorage.getItem('pinguinos_save');
+    if (!raw) return;
+    const save = JSON.parse(raw);
+
+    if (save.level !== currentLevelIndex) {
+      // Need to rebuild the level
+      transitioningLevel = true;
+      controlsDisabled = true;
+      fadeOverlay.style.opacity = '1';
+      await sleep(500);
+
+      const physics = await initPhysics();
+      world = physics.world;
+      RAPIER = physics.RAPIER;
+
+      while (scene.children.length > 0) {
+        scene.remove(scene.children[0]);
+      }
+
+      currentLevelIndex = save.level;
+      level = levels[currentLevelIndex];
+
+      // Re-add default lighting for level 1, skip for level 2+
+      if (currentLevelIndex === 0) {
+        scene.add(sunLight);
+        scene.add(ambientLight);
+      }
+
+      level.setup(scene, world, RAPIER);
+
+      penguin = createPenguin(world, RAPIER);
+      scene.add(penguin.group);
+      penguin.group.traverse((child) => {
+        if (child instanceof THREE.Mesh) child.castShadow = true;
+      });
+
+      controller = new PlayerController(penguin.rigidBody, RAPIER, world, penguin.group);
+      followCamera.target = penguin.group;
+      followCamera.setFollowRotation(currentLevelIndex > 0);
+      controller.setTankControls(currentLevelIndex > 0);
+
+      enteringPortal = false;
+      portalFallProgress = 0;
+      earthquakeActive = false;
+      faintActive = false;
+      penguin.group.scale.set(1, 1, 1);
+
+      ui.setObjective(levelObjectives[currentLevelIndex] ?? '');
+
+      fadeOverlay.style.opacity = '0';
+      await sleep(500);
+      controlsDisabled = false;
+      transitioningLevel = false;
+    }
+
+    // Teleport penguin to saved position
+    penguin.rigidBody.setTranslation({ x: save.x, y: save.y, z: save.z }, true);
+    penguin.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    penguin.group.rotation.y = save.rotationY;
+    ui.showLoadIndicator();
+    sounds.playLoad();
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'F5' && !e.repeat) {
+      e.preventDefault();
+      quickSave();
+    }
+    if (e.code === 'F9' && !e.repeat) {
+      e.preventDefault();
+      quickLoad();
+    }
+  });
+  document.addEventListener('quicksave', () => quickSave());
+  document.addEventListener('quickload', () => quickLoad());
+
+  // Level 2 → Level 3 transition
+  document.addEventListener('wake-up-continue', () => {
+    const wakeUpEl = document.getElementById('wake-up')!;
+    wakeUpEl.style.display = 'none';
+    transitionToLevel(2);
+  });
 
   // Handle window resize
   window.addEventListener('resize', () => {

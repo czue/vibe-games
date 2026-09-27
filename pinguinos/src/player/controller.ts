@@ -10,14 +10,20 @@ export class PlayerController {
   private keys = new Set<string>();
   private spaceWasReleased = true;
   private _isGrounded = false;
+  private airJumpsUsed = 0;
+  private readonly maxAirJumps = 1;
+  private _didJump = false; // true on the frame a jump happens
 
   private readonly moveSpeed = 5;
   private readonly jumpImpulse = 3.5;
+  private readonly airJumpImpulse = 4.0;
   private readonly groundRayThreshold = 0.15;
   private readonly lerpFactor = 0.15;
   private readonly rotationLerpFactor = 0.15;
+  private readonly turnSpeed = 3.0;
 
   private targetAngle = 0;
+  private tankControls = false;
 
   constructor(
     rigidBody: InstanceType<typeof RAPIER.RigidBody>,
@@ -30,6 +36,8 @@ export class PlayerController {
     this.world = world;
     this.penguinGroup = penguinGroup;
 
+    this.targetAngle = penguinGroup.rotation.y;
+
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.code);
     });
@@ -41,7 +49,15 @@ export class PlayerController {
     });
   }
 
+  setTankControls(enabled: boolean): void {
+    this.tankControls = enabled;
+  }
+
   get isMoving(): boolean {
+    if (this.tankControls) {
+      return this.keys.has('KeyW') || this.keys.has('ArrowUp') ||
+             this.keys.has('KeyS') || this.keys.has('ArrowDown');
+    }
     const dir = this.getMovementDirection();
     return dir.x !== 0 || dir.z !== 0;
   }
@@ -50,44 +66,89 @@ export class PlayerController {
     return this._isGrounded;
   }
 
+  get didJump(): boolean {
+    return this._didJump;
+  }
+
+  get isAirJump(): boolean {
+    return this._didJump && this.airJumpsUsed > 0;
+  }
+
   update(deltaTime: number): void {
-    // Movement
-    const dir = this.getMovementDirection();
     const currentVel = this.rigidBody.linvel();
 
-    const targetVelX = dir.x * this.moveSpeed;
-    const targetVelZ = dir.z * this.moveSpeed;
+    if (this.tankControls) {
+      // Tank controls: A/D turn, W/S move forward/back relative to facing
+      let turnInput = 0;
+      if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) turnInput += 1;
+      if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) turnInput -= 1;
+      this.targetAngle += turnInput * this.turnSpeed * deltaTime;
+      this.penguinGroup.rotation.y = this.targetAngle;
 
-    const newVelX = THREE.MathUtils.lerp(currentVel.x, targetVelX, this.lerpFactor);
-    const newVelZ = THREE.MathUtils.lerp(currentVel.z, targetVelZ, this.lerpFactor);
+      let forwardInput = 0;
+      if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) forwardInput += 1;
+      if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) forwardInput -= 1;
 
-    this.rigidBody.setLinvel({ x: newVelX, y: currentVel.y, z: newVelZ }, true);
+      // Move in the direction the penguin faces
+      const targetVelX = Math.sin(this.targetAngle) * forwardInput * this.moveSpeed;
+      const targetVelZ = Math.cos(this.targetAngle) * forwardInput * this.moveSpeed;
 
-    // Rotation towards movement direction
-    if (dir.x !== 0 || dir.z !== 0) {
-      this.targetAngle = Math.atan2(dir.x, dir.z);
+      const newVelX = THREE.MathUtils.lerp(currentVel.x, targetVelX, this.lerpFactor);
+      const newVelZ = THREE.MathUtils.lerp(currentVel.z, targetVelZ, this.lerpFactor);
+      this.rigidBody.setLinvel({ x: newVelX, y: currentVel.y, z: newVelZ }, true);
+    } else {
+      // World-axis controls: WASD maps to world directions
+      const dir = this.getMovementDirection();
+      const targetVelX = dir.x * this.moveSpeed;
+      const targetVelZ = dir.z * this.moveSpeed;
+
+      const newVelX = THREE.MathUtils.lerp(currentVel.x, targetVelX, this.lerpFactor);
+      const newVelZ = THREE.MathUtils.lerp(currentVel.z, targetVelZ, this.lerpFactor);
+      this.rigidBody.setLinvel({ x: newVelX, y: currentVel.y, z: newVelZ }, true);
+
+      // Rotation towards movement direction
+      if (dir.x !== 0 || dir.z !== 0) {
+        this.targetAngle = Math.atan2(dir.x, dir.z);
+      }
+
+      const currentRotation = this.penguinGroup.rotation.y;
+      let angleDiff = this.targetAngle - currentRotation;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      this.penguinGroup.rotation.y = currentRotation + angleDiff * this.rotationLerpFactor;
     }
 
-    const currentRotation = this.penguinGroup.rotation.y;
-    // Shortest path angle interpolation
-    let angleDiff = this.targetAngle - currentRotation;
-    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-    this.penguinGroup.rotation.y = currentRotation + angleDiff * this.rotationLerpFactor;
-
-    // Ground check — start ray below the capsule (center - halfHeight - radius = -0.8)
+    // Ground check — start ray well below the capsule to avoid self-hit
     const pos = this.rigidBody.translation();
     const ray = new this.rapier.Ray(
-      { x: pos.x, y: pos.y - 0.8, z: pos.z },
+      { x: pos.x, y: pos.y - 0.85, z: pos.z },
       { x: 0, y: -1, z: 0 },
     );
-    const hit = this.world.castRay(ray, 2.0, true);
-    this._isGrounded = hit !== null && hit.timeOfImpact < this.groundRayThreshold;
+    const hit = this.world.castRay(ray, 0.5, true);
+    this._isGrounded = hit !== null && hit.timeOfImpact < this.groundRayThreshold && hit.timeOfImpact > 0.001;
 
-    // Jump
-    if (this.keys.has('Space') && this._isGrounded && this.spaceWasReleased) {
-      this.rigidBody.applyImpulse({ x: 0, y: this.jumpImpulse, z: 0 }, true);
-      this.spaceWasReleased = false;
+    // Reset air jumps when grounded
+    if (this._isGrounded) {
+      this.airJumpsUsed = 0;
+    }
+
+    // Jump (ground jump + up to 2 air jumps = triple jump)
+    this._didJump = false;
+    if (this.keys.has('Space') && this.spaceWasReleased) {
+      if (this._isGrounded) {
+        // Ground jump
+        this.rigidBody.applyImpulse({ x: 0, y: this.jumpImpulse, z: 0 }, true);
+        this.spaceWasReleased = false;
+        this._didJump = true;
+      } else if (this.airJumpsUsed < this.maxAirJumps) {
+        // Air jump — cancel downward velocity first for consistent height
+        const vel = this.rigidBody.linvel();
+        this.rigidBody.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
+        this.rigidBody.applyImpulse({ x: 0, y: this.airJumpImpulse, z: 0 }, true);
+        this.airJumpsUsed++;
+        this.spaceWasReleased = false;
+        this._didJump = true;
+      }
     }
   }
 

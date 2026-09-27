@@ -14,15 +14,16 @@ export class PillarMaze implements Level {
   private sceneObjects: THREE.Object3D[] = [];
 
   // Maze center position
-  private readonly mazeHeight = 60;
+  private readonly mazeHeight = 25;
   private readonly mazeCenter = new THREE.Vector3(0, this.mazeHeight, 0);
-  private readonly mazeRadius = 18;
+  private readonly mazeRadius = 14;
 
   // Screen shake
   private cameraShakeOffset = new THREE.Vector3();
 
   getSpawnPosition() {
-    return { x: 0, y: 2, z: 0 };
+    // Start at the edge, near where the pillars begin
+    return { x: this.mazeRadius + 3, y: 2, z: 0 };
   }
 
   setup(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
@@ -131,36 +132,36 @@ export class PillarMaze implements Level {
   }
 
   private createStartPlatform(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
-    // A circular stone platform to start on
+    // A circular stone platform at the edge (matching spawn position)
+    const px = this.mazeRadius + 3;
     const geo = new THREE.CylinderGeometry(4, 4, 0.5, 16);
     const mat = new THREE.MeshStandardMaterial({ color: 0x887766, roughness: 0.9 });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(0, -0.25, 0);
+    mesh.position.set(px, -0.25, 0);
     mesh.receiveShadow = true;
     mesh.castShadow = true;
     scene.add(mesh);
     this.sceneObjects.push(mesh);
 
     // Physics
-    const bodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(0, -0.25, 0);
+    const bodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(px, -0.25, 0);
     const body = world.createRigidBody(bodyDesc);
-    rapier.ColliderDesc.cylinder(0.25, 4);
     const collider = rapier.ColliderDesc.cylinder(0.25, 4);
     world.createCollider(collider, body);
   }
 
   private createPillars(scene: THREE.Scene, world: InstanceType<typeof RAPIER.World>, rapier: typeof RAPIER): void {
-    // Pillars spiraling upward
-    const pillarCount = 25;
+    // Pillars spiraling upward from the edge, staying near the maze rim
+    const pillarCount = 15;
     const maxHeight = this.mazeHeight - 2;
 
     for (let i = 0; i < pillarCount; i++) {
       const progress = i / (pillarCount - 1);
       const height = progress * maxHeight;
 
-      // Spiral pattern
-      const angle = progress * Math.PI * 3; // 1.5 full rotations
-      const radius = 3 + progress * 4; // Spiral outward slightly
+      // Spiral around the rim, starting at angle 0 (where spawn is) and going ~3/4 around
+      const angle = progress * Math.PI * 1.5;
+      const radius = this.mazeRadius + 3; // Stay outside the maze edge
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
 
@@ -245,9 +246,9 @@ export class PillarMaze implements Level {
     const wallThickness = 0.4;
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x665544, roughness: 0.9 });
 
-    // Outer wall (full ring with one gap)
+    // Outer wall (full ring with one gap where the last pillar arrives)
     this.createRingWall(scene, world, rapier, cx, cz, y, this.mazeRadius - 0.2, wallHeight, wallThickness, wallMat, [
-      { start: 0, end: 0.15 }, // Gap facing the pillar landing area
+      { start: 0.70, end: 0.82 }, // Gap at ~270 degrees where pillars end
     ]);
 
     // Ring 1 (radius 13)

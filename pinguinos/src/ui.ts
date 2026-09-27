@@ -32,4 +32,21 @@ export class GameUI {
       this.controlsHintEl.style.opacity = '0';
     }, 5000);
   }
+
+  showSaveIndicator(): void {
+    this.showFlashMessage('Game Saved');
+  }
+
+  showLoadIndicator(): void {
+    this.showFlashMessage('Game Loaded');
+  }
+
+  private showFlashMessage(text: string): void {
+    const el = document.getElementById('flash-message')!;
+    el.textContent = text;
+    el.style.opacity = '1';
+    setTimeout(() => {
+      el.style.opacity = '0';
+    }, 1500);
+  }
 }
