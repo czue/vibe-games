@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bob the Blob</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🟢</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #9fd8ff; font-family: 'Fredoka', 'Segoe UI', sans-serif; }
+    canvas { display: block; }
+    #ui { position: absolute; inset: 0; pointer-events: none; color: white; }
+
+    #hud {
+      position: absolute; top: 0; left: 0; right: 0;
+      display: flex; align-items: flex-start; justify-content: space-between;
+      padding: 14px 20px; gap: 20px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    }
+    #hearts { font-size: 30px; letter-spacing: 4px; min-width: 150px; }
+    #meter-wrap { flex: 0 1 460px; text-align: center; }
+    #meter-label { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    #meter {
+      height: 22px; border-radius: 11px; overflow: hidden;
+      background: rgba(0,0,0,0.3); border: 3px solid white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    #meter-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #7ddf64, #c6ff4d);
+      transition: width 0.25s;
+    }
+    #level-name { font-size: 18px; font-weight: 600; min-width: 150px; text-align: right; }
+
+    #hint {
+      position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+      font-size: 15px; background: rgba(0,0,0,0.35); padding: 6px 16px; border-radius: 20px;
+      white-space: nowrap;
+    }
+
+    #big-message {
+      position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%) scale(0.6);
+      text-align: center; font-size: 64px; font-weight: 700; line-height: 1.1;
+      color: #fff; -webkit-text-stroke: 3px #2e7d32;
+      text-shadow: 0 6px 0 #1b5e20, 0 10px 20px rgba(0,0,0,0.4);
+      opacity: 0; transition: opacity 0.4s, transform 0.4s cubic-bezier(.3,1.8,.5,1);
+    }
+    #big-message.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    #big-message small {
+      display: block; font-size: 26px; -webkit-text-stroke: 0; font-weight: 600;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5); margin: 6px 0;
+    }
+
+    .bubble {
+      position: absolute; transform: translate(-50%, -100%);
+      background: white; color: #333; font-weight: 600; font-size: 17px;
+      padding: 6px 14px; border-radius: 16px; white-space: nowrap;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.25);
+      margin-top: -12px;
+    }
+    .bubble::after {
+      content: ''; position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%);
+      border: 10px solid transparent; border-bottom: 0; border-top-color: inherit;
+    }
+    .bubble { border-top-color: white; }
+    .bubble.bob { background: #e8ffd9; border-top-color: #e8ffd9; color: #1b5e20; }
+    .bubble.grumpy { background: #f3dcef; border-top-color: #f3dcef; color: #6b2d6b; }
+    .bubble.happy { background: #ffe3f1; border-top-color: #ffe3f1; color: #c2185b; }
+
+    #overlay {
+      position: absolute; inset: 0; display: none;
+      flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+      background: radial-gradient(circle, rgba(20,60,20,0.65), rgba(10,30,10,0.9));
+      text-align: center; font-size: 20px; pointer-events: auto; cursor: pointer;
+    }
+    #overlay.show { display: flex; }
+    #overlay h1 {
+      font-size: 84px; font-weight: 700; color: #c6ff4d;
+      -webkit-text-stroke: 4px #1b5e20; text-shadow: 0 8px 0 #1b5e20;
+    }
+    #overlay .tag { font-size: 24px; opacity: 0.9; }
+    #overlay .controls { list-style: none; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    #overlay .controls li { background: rgba(255,255,255,0.15); padding: 8px 14px; border-radius: 12px; }
+    #overlay .press { font-size: 28px; font-weight: 700; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 50% { transform: scale(1.08); } }
+
+    .bob-pic {
+      width: 110px; height: 90px; background: radial-gradient(circle at 35% 30%, #d4ffc4, #7ddf64 45%, #4caf50);
+      border-radius: 50% 50% 45% 45% / 60% 60% 40% 40%;
+      display: flex; justify-content: center; gap: 10px; padding-top: 24px;
+      animation: jiggle 0.9s infinite ease-in-out;
+    }
+    .bob-pic .eye { width: 26px; height: 26px; background: white; border-radius: 50%; position: relative; }
+    .bob-pic .eye::after { content: ''; position: absolute; width: 13px; height: 13px; background: #111; border-radius: 50%; top: 8px; left: 6px; }
+    @keyframes jiggle { 50% { transform: scale(1.1, 0.9); } }
+
+    #fade { position: absolute; inset: 0; background: white; opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div id="hud">
+      <div id="hearts"></div>
+      <div id="meter-wrap">
+        <div id="meter-label"></div>
+        <div id="meter"><div id="meter-fill"></div></div>
+      </div>
+      <div id="level-name"></div>
+    </div>
+    <div id="bubbles"></div>
+    <div id="big-message"></div>
+    <div id="hint">WASD / Arrows: move · Space: jump · E (hold): swallow · Q: spit</div>
+    <div id="fade"></div>
+    <div id="overlay"></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
