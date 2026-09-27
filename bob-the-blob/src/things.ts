@@ -25,6 +25,7 @@ export class Thing {
   dead = false;
   beingEaten = false;
   thrown = false;
+  isGoal = false; // swallowing this finishes the level
 
   constructor(public kind: Kind) {}
 
@@ -314,16 +315,27 @@ export function makePineTree(x: number, z: number, s: number): Thing {
   return t;
 }
 
-export function makeStump(x: number, z: number, r: number, h: number): Thing {
+/** holeSide: which way the log hole faces (+1 = +x, -1 = -x, 0 = no hole). */
+export function makeStump(x: number, z: number, r: number, h: number, holeSide: 1 | -1 | 0 = 1): Thing {
   const t = wall(x, z, r, h);
+  t.visualRadius = r * 1.1;
+  t.fadeable = h > 2.5;
   const side = mat(0x6d4c33);
   const top = mat(0xd8b98a);
-  const stump = mesh(new THREE.CylinderGeometry(r, r * 1.1, h, 12), [side, top, side]);
+  const stump = mesh(new THREE.CylinderGeometry(r, r * 1.1, h, 14), [side, top, side]);
   stump.position.y = h / 2;
-  // The dark hole the logs roll out of.
-  const hole = mesh(new THREE.CircleGeometry(r * 0.6, 16), mat(0x2a1a0e));
-  hole.position.set(r * 1.05, h * 0.45, 0);
-  hole.rotation.y = Math.PI / 2;
-  t.group.add(stump, hole);
+  t.group.add(stump);
+  if (holeSide !== 0) {
+    // The dark hole the logs roll out of.
+    const hole = mesh(new THREE.CircleGeometry(Math.min(r * 0.6, h * 0.4), 16), mat(0x2a1a0e));
+    hole.position.set(holeSide * r * 1.05, h * 0.45, 0);
+    hole.rotation.y = (holeSide * Math.PI) / 2;
+    t.group.add(hole);
+  }
+  // Tree rings on top
+  const ring = mesh(new THREE.TorusGeometry(r * 0.55, r * 0.03, 4, 24), mat(0xa9855a));
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = h + 0.01;
+  t.group.add(ring);
   return t;
 }

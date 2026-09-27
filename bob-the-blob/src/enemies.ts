@@ -100,7 +100,7 @@ export class Squash extends Thing {
     if (this.hopT >= 1) {
       this.pos.y = 0;
       this.state = 'idle';
-      this.timer = rand(0.7, 1.4);
+      this.timer = rand(0.45, 0.9);
       this.squish = 1;
       game.pushOut(this);
       game.onSquashLand(this);
@@ -111,7 +111,9 @@ export class Squash extends Thing {
     const bob = game.bob;
     this.from.copy(this.pos);
     if (flatDist(bob.pos, this.pos) < this.aggro && bob.squashTimer <= 0) {
-      this.to.set(bob.pos.x, 0, bob.pos.z);
+      // Aim where Bob is heading, not where he is.
+      const lead = (0.5 + this.size * 0.2) * 0.7;
+      this.to.set(bob.pos.x + bob.vel.x * lead, 0, bob.pos.z + bob.vel.z * lead);
       const maxHop = this.size * 3 + 2;
       const dx = this.to.x - this.from.x;
       const dz = this.to.z - this.from.z;
@@ -719,5 +721,112 @@ export class Bigfoot extends Thing {
     this.body.scale.setScalar(this.s);
     game.thingSay(this, pick(['Hey! Rude! 😵', 'Ow, my nose!', 'Bleh! Blob spit!']));
     return true;
+  }
+}
+
+// ---------- The goal treat: swallow it to finish the level ----------
+
+const TAUNTS = ["Nyah nyah! Can't eat me!", "You're too tiny!", 'Come and get me! 😜', 'Grow up first, blobby!'];
+const WORRIED = ['Uh oh...', 'Wait, you got BIG!', 'Eek! 😱', "Let's talk about this!"];
+
+export class GoalTreat extends Thing {
+  private body = new THREE.Group();
+  private arrow: THREE.Mesh;
+  private beamMat: THREE.MeshBasicMaterial;
+  private talk = rand(1, 3);
+  private phase = 0;
+
+  constructor(x: number, z: number, y: number, size: number, style: 'strawberry' | 'pinecone') {
+    super('food');
+    this.isGoal = true;
+    this.pos.set(x, y, z);
+    this.radius = this.size = this.visualRadius = size;
+    this.height = size * 1.9;
+    this.edible = true;
+
+    if (style === 'strawberry') {
+      this.color.set(0xe8283c);
+      const profile = [
+        [0, 0],
+        [0.3, 0.12],
+        [0.68, 0.5],
+        [0.95, 1.05],
+        [0.9, 1.5],
+        [0.6, 1.8],
+        [0, 1.88],
+      ].map(([r, h]) => new THREE.Vector2(r, h));
+      const berry = mesh(new THREE.LatheGeometry(profile, 24), mat(0xe8283c, { flatShading: false, roughness: 0.35 }));
+      this.body.add(berry);
+      const seedMat = mat(0xffe082);
+      for (let i = 0; i < 40; i++) {
+        const h = rand(0.25, 1.55);
+        const a = rand(0, Math.PI * 2);
+        // Rough radius of the lathe profile at this height.
+        const r = h < 1.05 ? 0.3 + (h / 1.05) * 0.65 : 0.95 - ((h - 1.05) / 0.8) * 0.35;
+        const seed = mesh(new THREE.SphereGeometry(0.035, 5, 4), seedMat);
+        seed.position.set(Math.cos(a) * r, h, Math.sin(a) * r);
+        this.body.add(seed);
+      }
+      const leafMat = mat(0x3f8f2f);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const leaf = mesh(new THREE.ConeGeometry(0.14, 0.6, 4), leafMat);
+        leaf.position.set(Math.cos(a) * 0.3, 1.85, Math.sin(a) * 0.3);
+        leaf.rotation.set(Math.sin(a) * 1.2, 0, -Math.cos(a) * 1.2);
+        this.body.add(leaf);
+      }
+    } else {
+      this.color.set(0xffc400);
+      const gold = mat(0xffc400, { metalness: 0.4, roughness: 0.3, emissive: 0xff9900, emissiveIntensity: 0.35 });
+      const darkGold = mat(0xd49a00, { metalness: 0.4, roughness: 0.3, emissive: 0xaa6600, emissiveIntensity: 0.3 });
+      for (let i = 0; i < 5; i++) {
+        const w = 0.8 - Math.abs(i - 1.6) * 0.16;
+        const c = mesh(new THREE.ConeGeometry(w, 0.5, 8), i % 2 ? gold : darkGold);
+        c.position.y = 0.3 + i * 0.33;
+        c.rotation.x = Math.PI;
+        this.body.add(c);
+      }
+    }
+    const eyes = makeEyes(0.14, 0.2);
+    eyes.position.set(0, 1.2, style === 'strawberry' ? 0.84 : 0.62);
+    const mouth = makeMouth(0.12, 'grin');
+    mouth.position.set(0, 0.95, style === 'strawberry' ? 0.9 : 0.66);
+    this.body.add(eyes, mouth);
+    this.body.scale.setScalar(size);
+    this.group.add(this.body);
+
+    // A beam of light and a bouncing arrow so you always know where to go.
+    this.beamMat = new THREE.MeshBasicMaterial({
+      color: 0xfff176,
+      transparent: true,
+      opacity: 0.18,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(size * 1.1, size * 1.1, 40, 20, 1, true), this.beamMat);
+    beam.position.y = 20;
+    this.arrow = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 4), new THREE.MeshBasicMaterial({ color: 0xffeb3b }));
+    this.arrow.rotation.x = Math.PI;
+    this.group.add(beam, this.arrow);
+  }
+
+  update(dt: number, game: Game): void {
+    const bob = game.bob;
+    const bigEnough = bob.radius * 0.85 > this.size;
+    this.phase += dt;
+    this.arrow.position.y = this.height + 1.2 + Math.abs(Math.sin(this.phase * 3)) * 0.8;
+    this.arrow.rotation.y += dt * 2;
+    this.beamMat.opacity = bigEnough ? 0.22 + Math.sin(this.phase * 6) * 0.1 : 0.12;
+    this.body.rotation.y = turnToward(this.body.rotation.y, angleTo(this.pos, bob.pos), dt * 4);
+    this.body.position.y = Math.abs(Math.sin(this.phase * (bigEnough ? 9 : 3))) * this.size * 0.15;
+
+    const d = flatDist(bob.pos, this.pos);
+    this.talk -= dt;
+    if (d < 10 && this.talk <= 0) {
+      const text = bigEnough ? pick(WORRIED) : pick(TAUNTS);
+      game.ui.say(this, () => this.pos.clone().setY(this.pos.y + this.height + 0.4), text, 2.2, 'happy');
+      this.talk = rand(4, 7);
+    }
   }
 }

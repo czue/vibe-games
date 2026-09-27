@@ -24,7 +24,9 @@ Then open the URL shown in the terminal (usually http://localhost:5173). Add `?l
 ## How to Play
 
 - You can only swallow things **smaller than you**. The more you eat, the bigger you get.
-- Fill the size meter to grow into the next level, where the world is a whole new scale.
+- Fill the size meter until Bob is **big enough**, then find the level's goal treat (follow the beam of light).
+  It sits on top of a tall stump past the log lanes — jump up the stair-stumps to reach it, then swallow it
+  to grow into the next level, where the world is a whole new scale.
 - **Squashes, rolling logs, and Bigfoot** squash you flat like a pancake, and you lose some of what you ate.
 - **Pinecones and thorny vines** hurt (you lose a heart). Watch for the shadow of falling pinecones!
 - **Flower vines** are your friends and give hearts back.
@@ -32,7 +34,7 @@ Then open the URL shown in the terminal (usually http://localhost:5173). Add `?l
 
 ## Levels
 
-1. **The Forest Floor** — Bob is ant-sized and everything is huge.
-2. **The Big Woods** — Bob is bunny-sized, the squashes are snacks, and Bigfoot is on the loose.
+1. **The Forest Floor** — Bob is ant-sized and everything is huge. Goal: the Giant Strawberry 🍓.
+2. **The Big Woods** — Bob is bunny-sized, the little squashes are snacks (the medium ones aren't!), and Bigfoot is on the loose. Goal: the Golden Pinecone ✨.
 
 Coming someday: planets. 🪐

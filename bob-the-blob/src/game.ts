@@ -38,6 +38,7 @@ export class Game {
   private shake = 0;
   private swallowRepeat = 0;
   private growTimer = 0;
+  private goalAnnounced = false;
   private clock = 0;
   private camLook = new THREE.Vector3();
   private sun: THREE.DirectionalLight;
@@ -84,6 +85,7 @@ export class Game {
     this.eating = [];
     this.particles = [];
     this.time = 0;
+    this.goalAnnounced = false;
     this.scene.background = new THREE.Color(this.level.sky);
     this.scene.fog = new THREE.Fog(this.level.sky, this.level.fogNear, this.level.fogFar);
 
@@ -191,10 +193,20 @@ export class Game {
       1,
     );
     const names = this.level.sizeNames;
+    const bigEnough = frac >= 0.999;
     this.ui.setHearts(b.hearts, b.maxHearts);
-    this.ui.setMeter(frac, `Bob is as big as ${names[Math.min(names.length - 1, Math.floor(frac * names.length))]}`);
+    this.ui.setMeter(
+      frac,
+      bigEnough
+        ? `Big enough! Now swallow the ${this.level.goalName}!`
+        : `Bob is as big as ${names[Math.min(names.length - 1, Math.floor(frac * names.length))]}`,
+    );
 
-    if (r >= this.level.targetRadius && this.eating.length === 0 && b.squashTimer <= 0) this.startGrowing();
+    if (bigEnough && !this.goalAnnounced) {
+      this.goalAnnounced = true;
+      sfx.heal();
+      this.ui.big(`Bob is big enough!<small>Now go swallow the ${this.level.goalName}!</small><small>(follow the light)</small>`, 4);
+    }
   }
 
   // ---------- Bob physics ----------
@@ -415,7 +427,8 @@ export class Game {
   private finishEating(t: Thing): void {
     const b = this.bob;
     const gain = t.size ** 3 * 1.5 * t.growth + 0.01;
-    b.volume += gain;
+    // Bob can't grow past "big enough" — the only way forward is the goal treat.
+    b.volume = Math.min(b.volume + gain, this.level.targetRadius ** 3);
     b.stomach.push({ thing: t, gain });
     b.color.lerp(t.color, 0.12);
     t.dead = true;
@@ -423,6 +436,11 @@ export class Game {
     sfx.gulp();
     b.gulpTimer = 0.2;
     b.landSquish = 0.5;
+
+    if (t.isGoal) {
+      this.startGrowing();
+      return;
+    }
 
     if (t.kind === 'squash') this.bobSay(pick(['Squash is a snack now! 😋', 'Revenge is tasty!']));
     else if (t.kind === 'bug') this.bobSay(pick(['Crunchy bug!', 'Sorry ladybug!']));

@@ -18,7 +18,7 @@ import {
   makeStump,
   makeTrunk,
 } from './things';
-import { Bigfoot, FallingCone, FlowerVine, Ladybug, RollingLog, Squash, ThornVine } from './enemies';
+import { Bigfoot, FallingCone, FlowerVine, GoalTreat, Ladybug, RollingLog, Squash, ThornVine } from './enemies';
 
 export interface LevelDef {
   name: string;
@@ -31,6 +31,8 @@ export interface LevelDef {
   fogNear: number;
   fogFar: number;
   sizeNames: string[];
+  goalName: string;
+  laneZs: number[]; // z of each log lane, so random stuff doesn't get dropped on them
   build(game: Game): void;
   tick(game: Game, dt: number): void;
 }
@@ -38,12 +40,13 @@ export interface LevelDef {
 const BERRY_COLORS = [0xe53935, 0x3949ab, 0x8e24aa, 0xff6f91];
 const CAP_COLORS = [0xe53935, 0xff7043, 0xf4b400];
 
-/** A random spot that isn't inside anything solid. */
+/** A random spot that isn't inside anything solid (or on a log lane). */
 function freeSpot(game: Game, r: number): [number, number] {
   const lim = game.bounds - 1.5;
   for (let tries = 0; tries < 40; tries++) {
     const x = rand(-lim, lim);
     const z = rand(-lim, lim);
+    if (game.level.laneZs.some((lz) => Math.abs(lz - z) < 2 + r)) continue;
     const blocked = game.things.some((t) => t.solid && Math.hypot(t.pos.x - x, t.pos.z - z) < t.radius + r + 0.4);
     if (!blocked) return [x, z];
   }
@@ -104,107 +107,189 @@ function countSmallFood(game: Game, maxSize: number): number {
   return game.things.filter((t) => t.kind === 'food' && t.size <= maxSize).length;
 }
 
+// ---------- Log lanes ----------
+
+interface Lane {
+  z: number;
+  dir: 1 | -1;
+  speed: number;
+  every: [number, number];
+  logR: number;
+  length: number;
+  timer: number;
+}
+
+function addLanes(game: Game, lanes: Lane[], stumpR: number, stumpH: number): void {
+  const B = game.bounds;
+  for (const lane of lanes) {
+    addLane(game, lane.z, lane.length + 0.4);
+    game.add(makeStump(-lane.dir * (B + 0.5), lane.z, stumpR, stumpH, lane.dir));
+  }
+}
+
+function tickLanes(game: Game, lanes: Lane[], dt: number): void {
+  const B = game.bounds;
+  for (const lane of lanes) {
+    lane.timer -= dt;
+    if (lane.timer > 0) continue;
+    lane.timer = rand(...lane.every);
+    game.add(
+      new RollingLog(-lane.dir * (B - 1.5), lane.z, new THREE.Vector3(lane.dir, 0, 0), lane.logR, lane.length, lane.speed),
+    );
+  }
+}
+
+function dropCone(game: Game, size: number, spread: number): void {
+  const a = rand(0, Math.PI * 2);
+  const d = rand(0, spread);
+  const lim = game.bounds - 1;
+  const x = THREE.MathUtils.clamp(game.bob.pos.x + Math.cos(a) * d, -lim, lim);
+  const z = THREE.MathUtils.clamp(game.bob.pos.z + Math.sin(a) * d, -lim, lim);
+  game.add(new FallingCone(x, z, size));
+}
+
+/**
+ * The goal treat sits on a tall stump. You can only get up there by jumping
+ * step -> step -> top, and the steps are too tall to reach until Bob has grown.
+ */
+function buildGoalTower(
+  game: Game,
+  top: [number, number, number, number], // x, z, radius, height
+  steps: [number, number, number, number][],
+  goal: (y: number) => GoalTreat,
+): void {
+  for (const [x, z, r, h] of steps) game.add(makeStump(x, z, r, h, 0));
+  const [x, z, r, h] = top;
+  const tower = game.add(makeStump(x, z, r, h, 0));
+  tower.fadeable = false;
+  game.add(goal(tower.top));
+}
+
 // =====================================================================
 // Level 1: tiny Bob on the forest floor
 // =====================================================================
 
-const L1_LANE_Z = -1;
+let l1Lanes: Lane[] = [];
 let l1ConeTimer = 0;
-let l1LogTimer = 0;
 let l1FoodTimer = 0;
 
 const level1: LevelDef = {
   name: 'The Forest Floor',
   subtitle: 'Bob is tiny. Everything else is HUGE.',
   bounds: 22,
-  start: [0, 17],
+  start: [0, 18],
   startRadius: 0.5,
   targetRadius: 1.4,
   sky: 0x9fd8ff,
   fogNear: 30,
   fogFar: 75,
   sizeNames: ['an ant', 'a ladybug', 'a grape', 'a strawberry', 'a plum', 'a lemon', 'an apple'],
+  goalName: 'GIANT STRAWBERRY 🍓',
+  laneZs: [9, 1, -7],
 
   build(game) {
+    l1Lanes = [
+      { z: 9, dir: 1, speed: 5, every: [2.2, 3.8], logR: 0.45, length: 3, timer: 0.5 },
+      { z: 1, dir: -1, speed: 6, every: [2, 3.4], logR: 0.45, length: 3, timer: 1.5 },
+      { z: -7, dir: 1, speed: 6.5, every: [1.8, 3.2], logR: 0.5, length: 3.2, timer: 1 },
+    ];
     l1ConeTimer = 6;
-    l1LogTimer = 2;
     l1FoodTimer = 0;
     const B = this.bounds;
     addGround(game, 0x78b856, 0x8b6b43, 0x9ccc65);
-    addLane(game, L1_LANE_Z, 3.2);
+    addLanes(game, l1Lanes, 1.6, 1.4);
 
     // Border: giant grass at the back and sides, low rocks along the front so the camera can see.
     for (let x = -B - 1; x <= B + 1; x += 1.6) game.add(makeGrassClump(x, -B - 1, rand(6, 10), 1));
     for (let z = -B; z <= B - 6; z += 1.8) {
+      if (this.laneZs.some((lz) => Math.abs(lz - z) < 2)) continue;
       game.add(makeGrassClump(-B - 1, z, rand(4, 7), 1));
       game.add(makeGrassClump(B + 1, z, rand(4, 7), 1));
     }
     for (let x = -B; x <= B; x += 1.7) game.add(makeRock(x, B + 1, rand(0.6, 0.9), false));
     for (const side of [-1, 1]) for (let z = B - 6; z <= B; z += 1.7) game.add(makeRock(side * (B + 1), z, rand(0.6, 0.9), false));
 
+    // The goal: a Giant Strawberry on top of a tall stump at the back.
+    // Max jump at full size is ~3.1, so every hop (2.2, 1.7, 1.6) is needed — no skipping.
+    buildGoalTower(
+      game,
+      [0, -16, 2.2, 5.5],
+      [
+        [-6.5, -12, 1.4, 2.2],
+        [-3.9, -14.6, 1.2, 3.9],
+      ],
+      (y) => new GoalTreat(0, -16, y, this.targetRadius * 0.85 - 0.02, 'strawberry'),
+    );
+
     // Big scenery
-    game.add(makeTrunk(-13, -16, 3.2, 16));
+    game.add(makeTrunk(-14, -17, 3.2, 16));
     game.add(makePineTree(13, -18, 3.5));
     game.add(makePineTree(19, -13, 3));
-    game.add(makeGiantMushroom(-18, -6, 2.6, 4.5, 0xe53935, false));
+    game.add(makeGiantMushroom(-18, -11, 2.4, 4.5, 0xe53935, false));
     for (const [x, z, h] of [
-      [-6, -7, 5],
-      [8, -7, 6],
+      [-8, -3, 5],
+      [8, -3, 6],
       [-15, 5, 5],
-      [4, 12, 4],
-      [-8, 14, 4],
-      [17, 16, 4],
+      [15, 5, 5],
+      [4, 14, 4],
+      [-8, 15, 4],
+      [18, 17, 4],
+      [10, -12, 5],
     ]) {
       game.add(makeGrassClump(x, z, h, 1.2));
     }
 
     // Mushroom stairs with golden berries on top
-    game.add(makeGiantMushroom(6, 7, 1.4, 0.9, 0xff7043, true));
-    game.add(makeGiantMushroom(9, 4.8, 1.2, 2.0, 0xf4b400, true));
-    const top = game.add(makeGiantMushroom(12.6, 6.4, 1.4, 3.0, 0xe53935, true));
-    game.add(makeGoldenBerry(12.3, 6.2, 0.3, top.top));
-    game.add(makeGoldenBerry(13.0, 6.8, 0.3, top.top));
+    game.add(makeGiantMushroom(9, 13, 1.4, 0.9, 0xff7043, true));
+    game.add(makeGiantMushroom(12, 15.2, 1.2, 2.0, 0xf4b400, true));
+    const top = game.add(makeGiantMushroom(15, 13, 1.4, 3.0, 0xe53935, true));
+    game.add(makeGoldenBerry(14.7, 12.8, 0.3, top.top));
+    game.add(makeGoldenBerry(15.4, 13.4, 0.3, top.top));
 
     // Golden berry stash hidden inside a ring of rocks — push them out of the way!
-    ringOfRocks(game, -15, 11, 1.9, 0.85, 6);
-    game.add(makeGoldenBerry(-15.4, 11, 0.3));
-    game.add(makeGoldenBerry(-14.6, 10.6, 0.3));
-    game.add(makeGoldenBerry(-14.9, 11.6, 0.3));
+    ringOfRocks(game, -15, 15, 1.9, 0.85, 6);
+    game.add(makeGoldenBerry(-15.4, 15, 0.3));
+    game.add(makeGoldenBerry(-14.6, 14.6, 0.3));
+    game.add(makeGoldenBerry(-14.9, 15.6, 0.3));
 
     // Loose rocks to push around (and eventually eat)
     for (const [x, z, r] of [
       [2, 5, 1.1],
-      [-3, 8, 0.9],
-      [15, 11, 1.0],
-      [-10, -13, 1.2],
+      [-3, -3, 0.9],
+      [15, -3, 1.0],
+      [7, -15, 1.2],
     ]) {
       game.add(makeRock(x, z, r));
     }
 
-    // Log stump — logs roll out of it along the dirt lane
-    game.add(makeStump(-B - 0.5, L1_LANE_Z, 1.6, 1.4));
-
     // Vines
     for (const [x, z] of [
-      [3, -10],
-      [-10, -6],
+      [3, -11],
+      [-10, -3],
       [14, -10],
-      [-4, 11],
-      [18, 9],
+      [-4, 13],
+      [18, 4],
+      [-2, 5],
     ]) {
       game.add(new ThornVine(x, z, 1.3));
     }
     for (const [x, z] of [
-      [3, 14],
-      [-16, -9],
-      [18, -5],
+      [3, 16],
+      [-17, -2.5],
+      [-18, 4],
     ]) {
       game.add(new FlowerVine(x, z, 1.3));
     }
 
     // Squashes!
-    game.add(new Squash(8, -13, 1.4, 8));
-    game.add(new Squash(-4, -15, 1.4, 8));
+    for (const [x, z] of [
+      [-4, -10],
+      [10, -16],
+      [-12, 4],
+      [10, -1],
+    ]) {
+      game.add(new Squash(x, z, 1.4, 10));
+    }
 
     // Food
     for (let i = 0; i < 25; i++) game.add(makeSeed(...freeSpot(game, 0.2), rand(0.12, 0.18)));
@@ -217,31 +302,19 @@ const level1: LevelDef = {
     for (let i = 0; i < 8; i++) {
       const a = rand(0, Math.PI * 2);
       const d = rand(4.5, 6.5);
-      game.add(makeAcorn(-13 + Math.cos(a) * d, Math.min(B - 1, -16 + Math.sin(a) * d + 2), rand(0.42, 0.5)));
+      game.add(makeAcorn(-14 + Math.cos(a) * d, Math.max(-B + 1, -17 + Math.sin(a) * d), rand(0.42, 0.5)));
     }
     for (let i = 0; i < 6; i++) game.add(makeMushroom(...freeSpot(game, 0.7), rand(0.5, 0.65), pick(CAP_COLORS)));
     for (let i = 0; i < 6; i++) game.add(new Ladybug(...freeSpot(game, 0.3), 0.25));
   },
 
   tick(game, dt) {
-    l1LogTimer -= dt;
-    if (l1LogTimer <= 0) {
-      l1LogTimer = rand(4, 5.5);
-      game.add(new RollingLog(-this.bounds + 1.5, L1_LANE_Z, new THREE.Vector3(1, 0, 0), 0.45, 3, 4.5));
-    }
+    tickLanes(game, l1Lanes, dt);
 
     l1ConeTimer -= dt;
     if (l1ConeTimer <= 0) {
-      l1ConeTimer = rand(3.5, 6);
-      const landed = game.things.filter((t) => t.kind === 'pinecone').length;
-      if (landed < 12) {
-        const a = rand(0, Math.PI * 2);
-        const d = rand(0, 2.5);
-        const lim = this.bounds - 1;
-        const x = THREE.MathUtils.clamp(game.bob.pos.x + Math.cos(a) * d, -lim, lim);
-        const z = THREE.MathUtils.clamp(game.bob.pos.z + Math.sin(a) * d, -lim, lim);
-        game.add(new FallingCone(x, z, 0.55));
-      }
+      l1ConeTimer = rand(2.5, 4.5);
+      if (game.things.filter((t) => t.kind === 'pinecone').length < 12) dropCone(game, 0.55, 2.5);
     }
 
     l1FoodTimer -= dt;
@@ -258,82 +331,109 @@ const level1: LevelDef = {
 };
 
 // =====================================================================
-// Level 2: rabbit-sized Bob in the big woods
+// Level 2: bunny-sized Bob in the big woods
 // =====================================================================
 
-const L2_LANE_Z = 3;
+let l2Lanes: Lane[] = [];
 let l2ConeTimer = 0;
-let l2LogTimer = 0;
 let l2FoodTimer = 0;
 
 const level2: LevelDef = {
   name: 'The Big Woods',
-  subtitle: 'Now the squashes look like snacks...',
+  subtitle: 'The little squashes look like snacks now...',
   bounds: 24,
-  start: [0, 19],
+  start: [0, 20],
   startRadius: 0.5,
   targetRadius: 1.6,
   sky: 0x8fcbe8,
   fogNear: 30,
   fogFar: 80,
   sizeNames: ['a bunny', 'a cat', 'a dog', 'a pony', 'a hippo', 'a car', 'a HOUSE'],
+  goalName: 'GOLDEN PINECONE ✨',
+  laneZs: [11, 3, -5],
 
   build(game) {
+    // Logs here are longer than Bob will ever be big, so they stay dangerous the whole level.
+    l2Lanes = [
+      { z: 11, dir: 1, speed: 6, every: [2, 3.5], logR: 0.6, length: 3.4, timer: 0.5 },
+      { z: 3, dir: -1, speed: 7, every: [1.8, 3.2], logR: 0.6, length: 3.4, timer: 1.5 },
+      { z: -5, dir: 1, speed: 7.5, every: [1.6, 3], logR: 0.65, length: 3.6, timer: 1 },
+    ];
     l2ConeTimer = 5;
-    l2LogTimer = 2;
     l2FoodTimer = 0;
     const B = this.bounds;
     addGround(game, 0x5e9e48, 0x7a5c3a, 0x7cb342);
-    addLane(game, L2_LANE_Z, 2.4);
+    addLanes(game, l2Lanes, 1.4, 1.5);
 
-    // Border: a wall of pine trees, with bushes and rocks along the front
+    // Border: a wall of pine trees, with rocks along the front
     for (let x = -B - 1; x <= B + 1; x += 2.2) game.add(makePineTree(x + rand(-0.4, 0.4), -B - 1.5, rand(1.2, 1.6)));
     for (let z = -B; z <= B - 6; z += 2.5) {
+      if (this.laneZs.some((lz) => Math.abs(lz - z) < 2)) continue;
       game.add(makePineTree(-B - 1.5, z, rand(1.0, 1.3)));
       game.add(makePineTree(B + 1.5, z, rand(1.0, 1.3)));
     }
     for (let x = -B; x <= B; x += 1.8) game.add(makeRock(x, B + 1, rand(0.6, 0.9), false));
     for (const side of [-1, 1]) for (let z = B - 6; z <= B; z += 1.7) game.add(makeRock(side * (B + 1), z, rand(0.6, 0.9), false));
 
+    // The goal: a Golden Pinecone on a tall stump. Max jump at full size is ~3.4,
+    // and the hops are 2.6, 2.0, 1.6 — step 1 needs Bob to be at least dog-sized.
+    buildGoalTower(
+      game,
+      [0, -17, 2.4, 6.2],
+      [
+        [-6.8, -12.5, 1.5, 2.6],
+        [-4.2, -15.2, 1.3, 4.6],
+      ],
+      (y) => new GoalTreat(0, -17, y, this.targetRadius * 0.85 - 0.02, 'pinecone'),
+    );
+
     // Groves inside the woods
     for (const [gx, gz] of [
-      [-10, -9],
-      [11, -11],
-      [-15, 12],
-      [13, 13],
-      [2, -18],
+      [-12, 7],
+      [12, -1],
+      [-15, 17],
+      [14, 17],
+      [13, -15],
+      [-15, -17],
     ]) {
-      for (let i = 0; i < 3; i++) game.add(makePineTree(gx + rand(-2.5, 2.5), gz + rand(-2, 2), rand(1.0, 1.4)));
+      for (let i = 0; i < 3; i++) game.add(makePineTree(gx + rand(-2.5, 2.5), gz + rand(-1.5, 1.5), rand(1.0, 1.4)));
     }
 
-    game.add(makeStump(-B - 0.5, L2_LANE_Z, 1.1, 1.0));
-
     // Golden stash in a ring of rocks
-    ringOfRocks(game, 17, -3, 1.6, 0.7, 6);
-    game.add(makeGoldenBerry(16.7, -3, 0.25));
-    game.add(makeGoldenBerry(17.3, -3.3, 0.25));
-    game.add(makeGoldenBerry(17.1, -2.5, 0.25));
+    ringOfRocks(game, 17, 7, 1.6, 0.7, 6);
+    game.add(makeGoldenBerry(16.7, 7, 0.25));
+    game.add(makeGoldenBerry(17.3, 6.7, 0.25));
+    game.add(makeGoldenBerry(17.1, 7.5, 0.25));
 
     for (let i = 0; i < 8; i++) game.add(makeRock(...freeSpot(game, 1.2), rand(0.6, 1.2)));
 
     for (const [x, z] of [
-      [-5, -4],
-      [7, -3],
-      [-12, 2],
-      [5, 11],
+      [-5, -1],
+      [7, 7],
+      [-12, -9],
+      [5, 16],
+      [4, -12],
     ]) {
       game.add(new ThornVine(x, z, 0.8));
     }
     for (const [x, z] of [
-      [-3, 15],
-      [15, 6],
-      [-17, -3],
+      [-3, 16],
+      [19, -1],
+      [-19, 0],
     ]) {
       game.add(new FlowerVine(x, z, 0.8));
     }
 
-    for (let i = 0; i < 5; i++) game.add(new Squash(...freeSpot(game, 0.8), 0.5, 7));
-    game.add(new Bigfoot(0, -12, 1));
+    // Little snack squashes, plus medium ones that can still flatten Bob until he's grown.
+    for (let i = 0; i < 5; i++) game.add(new Squash(...freeSpot(game, 0.8), 0.5, 8));
+    for (const [x, z] of [
+      [-8, 7],
+      [9, -1],
+      [-3, -10],
+    ]) {
+      game.add(new Squash(x, z, 1.2, 11));
+    }
+    game.add(new Bigfoot(6, -12, 1));
 
     for (let i = 0; i < 14; i++) game.add(makeBush(...freeSpot(game, 0.7), rand(0.35, 0.65)));
     for (let i = 0; i < 16; i++) game.add(makeMushroom(...freeSpot(game, 0.3), rand(0.15, 0.3), pick(CAP_COLORS)));
@@ -343,23 +443,12 @@ const level2: LevelDef = {
   },
 
   tick(game, dt) {
-    l2LogTimer -= dt;
-    if (l2LogTimer <= 0) {
-      l2LogTimer = rand(3.5, 5);
-      game.add(new RollingLog(-this.bounds + 1.2, L2_LANE_Z, new THREE.Vector3(1, 0, 0), 0.3, 1.6, 5));
-    }
+    tickLanes(game, l2Lanes, dt);
 
     l2ConeTimer -= dt;
     if (l2ConeTimer <= 0) {
-      l2ConeTimer = rand(4, 6.5);
-      if (game.things.filter((t) => t.kind === 'pinecone').length < 16) {
-        const a = rand(0, Math.PI * 2);
-        const d = rand(0, 2);
-        const lim = this.bounds - 1;
-        const x = THREE.MathUtils.clamp(game.bob.pos.x + Math.cos(a) * d, -lim, lim);
-        const z = THREE.MathUtils.clamp(game.bob.pos.z + Math.sin(a) * d, -lim, lim);
-        game.add(new FallingCone(x, z, 0.22));
-      }
+      l2ConeTimer = rand(3, 5);
+      if (game.things.filter((t) => t.kind === 'pinecone').length < 16) dropCone(game, 0.22, 2);
     }
 
     l2FoodTimer -= dt;
