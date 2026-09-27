@@ -1,0 +1,2999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude's Adventure</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 2px solid #3a1a5e;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+// ============================================================
+// CLAUDE'S ADVENTURE - A pixel art platformer
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// Game dimensions (internal resolution, scaled up)
+const GAME_W = 320;
+const GAME_H = 200;
+const SCALE = Math.min(
+  Math.floor(window.innerWidth / GAME_W),
+  Math.floor(window.innerHeight / GAME_H)
+);
+canvas.width = GAME_W * SCALE;
+canvas.height = GAME_H * SCALE;
+ctx.imageSmoothingEnabled = false;
+
+// Offscreen buffer for pixel-perfect rendering
+const buf = document.createElement('canvas');
+buf.width = GAME_W;
+buf.height = GAME_H;
+const bctx = buf.getContext('2d');
+bctx.imageSmoothingEnabled = false;
+
+// ============================================================
+// COLORS
+// ============================================================
+const COL = {
+  bg: '#1a0a2e',
+  bgMid: '#2a1040',
+  bgFar: '#0f0620',
+  claude: '#c47a5a',
+  claudeDark: '#a0604a',
+  claudeLight: '#d4956e',
+  eyes: '#1a0a2e',
+  ground: '#4a3060',
+  groundTop: '#6a4580',
+  platform: '#5a3a70',
+  platformTop: '#7a5590',
+  enemy1: '#c04040',
+  enemy1Dark: '#903030',
+  enemy1Eyes: '#ffffff',
+  enemy2: '#40a040',
+  enemy2Dark: '#308030',
+  enemy2Spike: '#60d060',
+  cloud: '#ccccdd',
+  cloudDark: '#9999aa',
+  sprinkle: '#ff88cc',
+  sprinkle2: '#88ccff',
+  sprinkle3: '#ffcc44',
+  rocketBody: '#c47a5a',
+  rocketNose: '#d4956e',
+  rocketFin: '#a0604a',
+  rocketFlame: '#ff6622',
+  rocketFlame2: '#ffcc00',
+  punchCloud: '#ffdddd',
+  punchCloudDark: '#ddaaaa',
+  punchSprinkle: '#ff4444',
+  punchSprinkle2: '#ff8844',
+  punchSprinkle3: '#ffaa22',
+  glove: '#dd2222',
+  gloveDark: '#aa1111',
+  gloveHighlight: '#ff6666',
+  wizard: '#6622cc',
+  wizardDark: '#441188',
+  wizardHat: '#4411aa',
+  wizardHatBrim: '#5518cc',
+  wizardEyes: '#ff0000',
+  wizardBolt: '#ffdd00',
+  wizardBolt2: '#ff8800',
+  wizardShield: '#aa66ff',
+  zombie: '#556b2f',
+  zombieDark: '#3a4a1f',
+  zombieLight: '#7a9a3f',
+  zombieEyes: '#ff0000',
+  zombieTeeth: '#ddddaa',
+  zombieSlam: '#8b4513',
+  mummy: '#d4c89a',
+  mummyDark: '#b0a474',
+  mummyWrap: '#e8deb8',
+  mummyEyes: '#cc3333',
+  token: '#ffd700',
+  tokenGlow: '#ffec80',
+  portal: '#80c0ff',
+  portalGlow: '#b0e0ff',
+  text: '#ffffff',
+  textShadow: '#000000',
+  heart: '#ff4060',
+  sky1: '#0f0620',
+  sky2: '#1a0a2e',
+  star: '#ffffff',
+};
+
+// ============================================================
+// AUDIO (procedural retro sounds via Web Audio API)
+// ============================================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playTone(freq, duration, type, volume, slide) {
+  const ctx = ensureAudio();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || 'square';
+  osc.frequency.setValueAtTime(freq, ctx.currentTime);
+  if (slide) osc.frequency.linearRampToValueAtTime(slide, ctx.currentTime + duration);
+  gain.gain.setValueAtTime(volume || 0.15, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + duration);
+}
+
+function playNoise(duration, volume) {
+  const ctx = ensureAudio();
+  const bufSize = ctx.sampleRate * duration;
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(volume || 0.1, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
+  src.connect(gain);
+  gain.connect(ctx.destination);
+  src.start(ctx.currentTime);
+}
+
+// ============================================================
+// MUSIC (procedural chiptune)
+// ============================================================
+let musicPlaying = null; // 'title', 'game', or null
+let musicNodes = []; // active oscillators/gains to stop
+let musicGeneration = 0; // incremented on stop to kill old loop callbacks
+
+function stopMusic() {
+  musicGeneration++;
+  for (const node of musicNodes) {
+    try { node.stop(); } catch(e) {}
+  }
+  musicNodes = [];
+  musicPlaying = null;
+}
+
+function scheduleNote(ctx, dest, freq, start, dur, type, vol) {
+  if (freq === 0) return; // rest
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, start);
+  gain.gain.setValueAtTime(vol, start + dur * 0.8);
+  gain.gain.linearRampToValueAtTime(0, start + dur);
+  osc.connect(gain);
+  gain.connect(dest);
+  osc.start(start);
+  osc.stop(start + dur);
+  musicNodes.push(osc);
+}
+
+// Note frequencies
+const N = {
+  C3:131, D3:147, Eb3:156, E3:165, F3:175, Fs3:185, G3:196, Ab3:208, A3:220, Bb3:233, B3:247,
+  C4:262, Cs4:277, D4:294, Eb4:311, E4:330, F4:349, Fs4:370, G4:392, Ab4:415, A4:440, Bb4:466, B4:494,
+  C5:523, D5:587, Eb5:622, E5:659, F5:698, Fs5:740, G5:784, A5:880,
+  R:0, // rest
+};
+
+function startGameMusic() {
+  if (musicPlaying === 'game') return;
+  stopMusic();
+  musicPlaying = 'game';
+  const ctx = ensureAudio();
+
+  // Melody - Zelda-inspired adventure theme, heroic and slightly mysterious
+  const melody = [
+    // Bar 1-2: opening motif - bold and heroic
+    N.A4, N.R, N.E4, N.R, N.A4, N.R, N.B4, N.R,
+    N.C5, N.R, N.R, N.D5, N.C5, N.R, N.A4, N.R,
+    // Bar 3-4: descending answer
+    N.G4, N.R, N.F4, N.R, N.E4, N.R, N.R, N.R,
+    N.D4, N.R, N.E4, N.R, N.F4, N.E4, N.R, N.R,
+    // Bar 5-6: rising adventure phrase
+    N.A4, N.R, N.R, N.C5, N.R, N.D5, N.E5, N.R,
+    N.D5, N.R, N.C5, N.R, N.A4, N.R, N.G4, N.R,
+    // Bar 7-8: mysterious resolution
+    N.F4, N.R, N.G4, N.R, N.A4, N.R, N.R, N.R,
+    N.E4, N.R, N.R, N.R, N.A3, N.R, N.R, N.R,
+  ];
+
+  // Arpeggiated accompaniment - harp-like
+  const arp = [
+    N.A3, N.C4, N.E4, N.C4, N.A3, N.C4, N.E4, N.C4,
+    N.A3, N.C4, N.E4, N.C4, N.A3, N.C4, N.E4, N.C4,
+    N.D3, N.F3, N.A3, N.F3, N.D3, N.F3, N.A3, N.F3,
+    N.D3, N.F3, N.A3, N.F3, N.E3, N.G3, N.B3, N.G3,
+    N.A3, N.C4, N.E4, N.C4, N.A3, N.C4, N.E4, N.C4,
+    N.F3, N.A3, N.C4, N.A3, N.F3, N.A3, N.C4, N.A3,
+    N.D3, N.F3, N.A3, N.F3, N.D3, N.F3, N.A3, N.F3,
+    N.E3, N.G3, N.B3, N.G3, N.A3, N.R, N.R, N.R,
+  ];
+
+  // Bass line - steady and grounding
+  const bass = [
+    N.A3, N.R, N.R, N.R, N.A3, N.R, N.R, N.R,
+    N.A3, N.R, N.R, N.R, N.A3, N.R, N.E3, N.R,
+    N.D3, N.R, N.R, N.R, N.D3, N.R, N.R, N.R,
+    N.D3, N.R, N.R, N.R, N.E3, N.R, N.R, N.R,
+    N.A3, N.R, N.R, N.R, N.A3, N.R, N.R, N.R,
+    N.F3, N.R, N.R, N.R, N.F3, N.R, N.R, N.R,
+    N.D3, N.R, N.R, N.R, N.D3, N.R, N.R, N.R,
+    N.E3, N.R, N.R, N.R, N.A3, N.R, N.R, N.R,
+  ];
+
+  const BPM = 120;
+  const beatDur = 60 / BPM / 2; // sixteenth notes
+  const loopLen = melody.length * beatDur;
+
+  const gen = musicGeneration;
+  function scheduleLoop(startTime) {
+    if (musicGeneration !== gen) return;
+    for (let i = 0; i < melody.length; i++) {
+      const t = startTime + i * beatDur;
+      scheduleNote(ctx, ctx.destination, melody[i], t, beatDur * 0.9, 'square', 0.05);
+    }
+    for (let i = 0; i < arp.length; i++) {
+      const t = startTime + i * beatDur;
+      scheduleNote(ctx, ctx.destination, arp[i], t, beatDur * 0.7, 'triangle', 0.04);
+    }
+    for (let i = 0; i < bass.length; i++) {
+      const t = startTime + i * beatDur;
+      scheduleNote(ctx, ctx.destination, bass[i], t, beatDur * 0.9, 'triangle', 0.06);
+    }
+    setTimeout(() => scheduleLoop(startTime + loopLen), (loopLen - 0.5) * 1000);
+  }
+  scheduleLoop(ctx.currentTime + 0.05);
+}
+
+function startTitleMusic() {
+  if (musicPlaying === 'title') return;
+  stopMusic();
+  musicPlaying = 'title';
+  const ctx = ensureAudio();
+
+  // Ethereal, mysterious arpeggio - Zelda title screen vibe
+  const notes = [
+    N.A3, N.E4, N.A4, N.R, N.E4, N.A4, N.C5, N.A4,
+    N.D4, N.F4, N.A4, N.R, N.F4, N.A4, N.D5, N.A4,
+    N.E3, N.B3, N.E4, N.R, N.G4, N.E4, N.B3, N.E4,
+    N.A3, N.C4, N.E4, N.R, N.A4, N.E4, N.C4, N.R,
+  ];
+
+  const BPM = 80;
+  const beatDur = 60 / BPM / 2;
+  const loopLen = notes.length * beatDur;
+
+  const gen = musicGeneration;
+  function scheduleLoop(startTime) {
+    if (musicGeneration !== gen) return;
+    for (let i = 0; i < notes.length; i++) {
+      const t = startTime + i * beatDur;
+      scheduleNote(ctx, ctx.destination, notes[i], t, beatDur * 0.85, 'triangle', 0.04);
+    }
+    setTimeout(() => scheduleLoop(startTime + loopLen), (loopLen - 0.5) * 1000);
+  }
+  scheduleLoop(ctx.currentTime + 0.05);
+}
+
+const SFX = {
+  jump() { playTone(250, 0.15, 'square', 0.12, 500); },
+  stomp() {
+    playTone(200, 0.1, 'square', 0.15, 80);
+    playNoise(0.08, 0.1);
+  },
+  hurt() {
+    playTone(300, 0.3, 'sawtooth', 0.12, 100);
+    playNoise(0.15, 0.08);
+  },
+  coin() {
+    playTone(700, 0.08, 'square', 0.1);
+    setTimeout(() => playTone(900, 0.12, 'square', 0.1), 60);
+  },
+  rocket() {
+    playTone(200, 0.4, 'sawtooth', 0.12, 800);
+    setTimeout(() => playTone(400, 0.3, 'square', 0.1, 1000), 150);
+    setTimeout(() => playTone(800, 0.2, 'square', 0.08, 1200), 300);
+  },
+  rocketEnd() {
+    playTone(600, 0.3, 'square', 0.1, 150);
+  },
+  punch() {
+    playTone(150, 0.08, 'square', 0.15, 80);
+    playNoise(0.06, 0.12);
+  },
+  punchHit() {
+    playTone(100, 0.12, 'square', 0.18, 50);
+    playNoise(0.1, 0.15);
+  },
+  wizardAppear() {
+    playTone(800, 0.15, 'sine', 0.08, 400);
+    playTone(600, 0.15, 'sine', 0.06, 900);
+  },
+  wizardShoot() {
+    playTone(500, 0.2, 'sawtooth', 0.08, 200);
+  },
+  wizardHit() {
+    playTone(300, 0.15, 'square', 0.12, 600);
+    playNoise(0.1, 0.08);
+  },
+  wizardDeath() {
+    [0, 80, 160, 240, 320, 400].forEach((delay, i) => {
+      setTimeout(() => {
+        playTone(200 + i * 80, 0.15, 'square', 0.1);
+        playNoise(0.08, 0.06);
+      }, delay);
+    });
+  },
+  zombieRoar() {
+    playTone(80, 0.5, 'sawtooth', 0.12, 50);
+    playNoise(0.3, 0.1);
+  },
+  zombieStomp() {
+    playTone(60, 0.2, 'square', 0.15, 30);
+    playNoise(0.15, 0.12);
+  },
+  zombieHit() {
+    playTone(150, 0.12, 'square', 0.12, 80);
+    playNoise(0.1, 0.1);
+  },
+  zombieDeath() {
+    [0, 100, 200, 350, 500, 650, 800].forEach((delay, i) => {
+      setTimeout(() => {
+        playTone(100 + i * 50, 0.2, 'sawtooth', 0.1);
+        playNoise(0.12, 0.08);
+      }, delay);
+    });
+  },
+  win() {
+    [0, 100, 200, 300, 450].forEach((delay, i) => {
+      setTimeout(() => playTone(400 + i * 100, 0.15, 'square', 0.1), delay);
+    });
+  },
+  gameOver() {
+    playTone(400, 0.25, 'square', 0.12, 300);
+    setTimeout(() => playTone(300, 0.25, 'square', 0.12, 200), 250);
+    setTimeout(() => playTone(200, 0.4, 'square', 0.12, 100), 500);
+  },
+};
+
+// ============================================================
+// INPUT
+// ============================================================
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
+    e.preventDefault();
+  }
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// Gamepad support
+const STICK_DEADZONE = 0.3;
+let gamepad = null;
+
+function pollGamepad() {
+  const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+  gamepad = null;
+  for (const gp of gamepads) {
+    if (gp && gp.connected) { gamepad = gp; break; }
+  }
+}
+
+function gpLeft() {
+  if (!gamepad) return false;
+  // Left stick or d-pad left (button 14)
+  return gamepad.axes[0] < -STICK_DEADZONE || (gamepad.buttons[14] && gamepad.buttons[14].pressed);
+}
+function gpRight() {
+  if (!gamepad) return false;
+  return gamepad.axes[0] > STICK_DEADZONE || (gamepad.buttons[15] && gamepad.buttons[15].pressed);
+}
+function gpUp() {
+  if (!gamepad) return false;
+  return gamepad.axes[1] < -STICK_DEADZONE || (gamepad.buttons[12] && gamepad.buttons[12].pressed);
+}
+function gpDown() {
+  if (!gamepad) return false;
+  return gamepad.axes[1] > STICK_DEADZONE || (gamepad.buttons[13] && gamepad.buttons[13].pressed);
+}
+function gpJump() {
+  if (!gamepad) return false;
+  // A (0), B (1), X (2), Y (3) — accept any face button as jump
+  return gamepad.buttons[0].pressed || gamepad.buttons[1].pressed;
+}
+
+function isLeft() { return keys['ArrowLeft'] || keys['KeyA'] || gpLeft(); }
+function isRight() { return keys['ArrowRight'] || keys['KeyD'] || gpRight(); }
+function isJump() { return keys['Space'] || keys['ArrowUp'] || keys['KeyW'] || gpJump(); }
+function isDown() { return keys['ArrowDown'] || keys['KeyS'] || gpDown(); }
+function isPunch() { return keys['KeyX'] || keys['KeyJ'] || (gamepad && gamepad.buttons[2] && gamepad.buttons[2].pressed); }
+
+let punchPressed = false; // edge detection for punch
+
+// ============================================================
+// GAME STATE
+// ============================================================
+const TILE = 16;
+const GRAVITY = 0.4;
+const JUMP_FORCE = -7;
+const MOVE_SPEED = 2;
+const FRICTION = 0.85;
+
+let gameState = 'title'; // title, playing, gameover, win, levelcomplete
+let score = 0;
+let lives = 3;
+let currentLevel = 1;
+const MAX_LEVEL = 8;
+let cameraX = 0;
+let frameCount = 0;
+let deathTimer = 0;
+let winTimer = 0;
+let shakeTimer = 0;
+let particles = [];
+let floatingTexts = [];
+
+// Stars for background
+const stars = [];
+for (let i = 0; i < 60; i++) {
+  stars.push({
+    x: Math.random() * GAME_W * 5,
+    y: Math.random() * GAME_H * 0.6,
+    size: Math.random() < 0.3 ? 2 : 1,
+    twinkle: Math.random() * Math.PI * 2,
+  });
+}
+
+// ============================================================
+// LEVEL DATA
+// ============================================================
+// Level is defined as a tile map. Legend:
+// 0 = air, 1 = ground, 2 = platform, T = token, E = walker enemy,
+// S = spike enemy, P = portal (goal)
+const LEVEL_ROWS = Math.floor(GAME_H / TILE); // 12 rows (0-11)
+const LEVEL_COLS = 100; // 100 columns wide
+
+function buildEmptyMap() {
+  const map = [];
+  for (let r = 0; r < LEVEL_ROWS; r++) {
+    map[r] = [];
+    for (let c = 0; c < LEVEL_COLS; c++) {
+      map[r][c] = 0;
+    }
+  }
+  return map;
+}
+
+function addGround(map) {
+  for (let c = 0; c < LEVEL_COLS; c++) {
+    map[11][c] = 1;
+    map[10][c] = 1;
+  }
+}
+
+function addGaps(map, gaps) {
+  for (const [start, end] of gaps) {
+    for (let c = start; c <= end; c++) {
+      map[11][c] = 0;
+      map[10][c] = 0;
+    }
+  }
+}
+
+function addPlatforms(map, platforms) {
+  for (const [row, cs, ce] of platforms) {
+    for (let c = cs; c <= ce; c++) {
+      map[row][c] = 2;
+    }
+  }
+}
+
+function buildLevel1() {
+  const map = buildEmptyMap();
+  addGround(map);
+  addGaps(map, [[15,17], [30,32], [55,57], [72,74]]);
+  addPlatforms(map, [
+    [7, 5, 8], [8, 12, 14], [6, 18, 21], [7, 25, 28],
+    [5, 33, 36], [8, 38, 40], [6, 43, 46], [7, 50, 53],
+    [5, 58, 61], [8, 63, 65], [6, 68, 71], [7, 76, 79],
+    [5, 82, 85], [8, 88, 90], [6, 93, 96],
+  ]);
+  return map;
+}
+
+function buildLevel2() {
+  const map = buildEmptyMap();
+  addGround(map);
+  // More gaps, but reachable
+  addGaps(map, [[8,10], [18,20], [32,34], [44,46], [53,55], [63,65], [76,78], [88,90]]);
+  // Platforms - harder than level 1 but all reachable
+  addPlatforms(map, [
+    [8, 5, 7], [7, 9, 11], [5, 14, 16],
+    [8, 18, 19], [6, 20, 22],              // stepping stones over gap
+    [7, 25, 27], [5, 30, 32],
+    [8, 33, 34], [6, 36, 38],              // over gap
+    [5, 41, 43],
+    [8, 44, 45], [6, 46, 48],              // over gap
+    [7, 50, 52],
+    [8, 53, 54], [6, 55, 57],              // over gap
+    [5, 60, 62],
+    [8, 63, 64], [6, 65, 67],              // over gap
+    [5, 70, 72], [7, 74, 75],
+    [8, 76, 77], [6, 78, 80],              // over gap
+    [5, 83, 85],
+    [8, 88, 89], [6, 90, 92],              // over gap
+    [7, 94, 97],
+  ]);
+  return map;
+}
+
+function buildLevel3() {
+  // Boss arena - shorter level, open arena at the end
+  const map = buildEmptyMap();
+  addGround(map);
+  // Small platforming section then open arena
+  addGaps(map, [[10,12], [20,22]]);
+  addPlatforms(map, [
+    [7, 4, 6], [6, 8, 10],
+    [8, 11, 12], [5, 14, 16],
+    [7, 19, 20], [8, 21, 22],
+    [6, 24, 26],
+    // Arena platforms for dodging wizard
+    [7, 32, 35], [5, 38, 41],
+    [7, 44, 47], [5, 50, 53],
+    [7, 56, 59], [5, 62, 65],
+    [3, 45, 48], [3, 55, 58],
+  ]);
+  return map;
+}
+
+function buildLevel4() {
+  // Coin extravaganza! Fun level with lots of platforms
+  const map = buildEmptyMap();
+  addGround(map);
+  addGaps(map, [[12,13], [25,26], [40,41], [55,56], [70,71], [85,86]]);
+  addPlatforms(map, [
+    // Staircase sections
+    [9, 3, 4], [8, 5, 6], [7, 7, 8], [6, 9, 10],
+    // Zigzag platforms
+    [8, 14, 16], [6, 17, 19], [8, 20, 22], [6, 23, 25],
+    // Floating islands
+    [5, 28, 32], [7, 30, 33], [4, 34, 37],
+    // Low bridges
+    [8, 38, 42], [8, 43, 47],
+    // High platforms
+    [4, 48, 51], [6, 49, 52], [3, 53, 56],
+    // Cascading
+    [7, 58, 60], [6, 61, 63], [5, 64, 66], [4, 67, 69],
+    // Final stretch
+    [7, 72, 75], [5, 76, 79], [7, 80, 83],
+    [6, 84, 87], [4, 88, 91], [7, 92, 95],
+    [5, 96, 98],
+  ]);
+  return map;
+}
+
+function buildLevel5() {
+  // Zombie boss arena - wide open with some cover
+  const map = buildEmptyMap();
+  addGround(map);
+  addGaps(map, [[10,12]]);
+  addPlatforms(map, [
+    [7, 4, 6], [5, 8, 10],
+    [8, 11, 12],
+    // Arena with platforms at different heights for dodging
+    [7, 20, 24], [5, 28, 32],
+    [7, 36, 40], [5, 44, 48],
+    [3, 32, 36], [3, 44, 48],
+    [7, 52, 56], [5, 60, 64],
+  ]);
+  return map;
+}
+
+function buildLevel8() {
+  // Big walker gauntlet
+  const map = buildEmptyMap();
+  addGround(map);
+  addGaps(map, [[10,11], [22,23], [38,39], [52,53], [65,66], [78,79], [90,91]]);
+  addPlatforms(map, [
+    [8, 4, 7], [6, 8, 11],
+    [7, 13, 16], [5, 15, 18],
+    [8, 20, 22], [6, 24, 27], [4, 28, 31],
+    [7, 33, 36], [5, 35, 38],
+    [8, 40, 43], [6, 42, 45], [4, 46, 49],
+    [7, 50, 53], [5, 54, 57],
+    [8, 58, 61], [6, 60, 63], [7, 64, 66],
+    [5, 67, 70], [8, 70, 73], [6, 74, 77],
+    [7, 80, 83], [5, 82, 85], [4, 86, 89],
+    [8, 92, 95], [6, 94, 97],
+  ]);
+  return map;
+}
+
+function buildLevel7() {
+  // Mummy gauntlet - lots of mummies and varied terrain
+  const map = buildEmptyMap();
+  addGround(map);
+  addGaps(map, [[8,9], [18,19], [30,31], [42,43], [55,56], [68,69], [80,81]]);
+  addPlatforms(map, [
+    [8, 4, 6], [6, 7, 9], [8, 10, 12],
+    [7, 14, 17], [5, 16, 18],
+    [8, 20, 23], [6, 22, 25], [4, 26, 29],
+    [7, 32, 35], [5, 34, 37], [8, 36, 39],
+    [6, 40, 43], [8, 44, 47], [5, 46, 49],
+    [7, 50, 53], [4, 52, 55],
+    [8, 57, 60], [6, 59, 62], [7, 63, 66],
+    [5, 65, 68], [8, 70, 73],
+    [7, 74, 77], [5, 76, 79],
+    [8, 82, 85], [6, 84, 87], [4, 88, 91],
+    [7, 92, 95], [5, 96, 98],
+  ]);
+  return map;
+}
+
+function buildLevel6() {
+  // Victory lap - all coins, no enemies, no gaps
+  const map = buildEmptyMap();
+  addGround(map);
+  addPlatforms(map, [
+    // Gentle platforms to put coins on at different heights
+    [8, 5, 8], [7, 10, 13], [6, 16, 19], [5, 22, 25],
+    [7, 28, 31], [8, 33, 36], [6, 39, 42], [5, 45, 48],
+    [7, 51, 54], [8, 56, 59], [6, 62, 65], [5, 68, 71],
+    [7, 74, 77], [8, 79, 82], [6, 85, 88], [5, 91, 94],
+  ]);
+  return map;
+}
+
+let levelMap = [];
+
+// Entities
+let player = null;
+let enemies = [];
+let tokens = [];
+let sprinkleClouds = [];
+let punchClouds = [];
+let portal = null;
+let wizard = null;
+let wizardBolts = [];
+let zombie = null;
+const ROCKET_DURATION = 10 * 60; // 10 seconds at 60fps
+const PUNCH_DURATION = 15 * 60; // 15 seconds at 60fps
+const PUNCH_ANIM_LEN = 12; // frames for punch animation
+
+function initLevel() {
+  if (currentLevel === 1) levelMap = buildLevel1();
+  else if (currentLevel === 2) levelMap = buildLevel2();
+  else if (currentLevel === 3) levelMap = buildLevel3();
+  else if (currentLevel === 4) levelMap = buildLevel4();
+  else if (currentLevel === 5) levelMap = buildLevel5();
+  else if (currentLevel === 6) levelMap = buildLevel6();
+  else if (currentLevel === 7) levelMap = buildLevel7();
+  else levelMap = buildLevel8();
+  cameraX = 0;
+  particles = [];
+  floatingTexts = [];
+  shakeTimer = 0;
+  wizard = null;
+  wizardBolts = [];
+  zombie = null;
+
+  player = {
+    x: 2 * TILE, y: 8 * TILE,
+    w: 12, h: 14,
+    vx: 0, vy: 0,
+    onGround: false,
+    facing: 1,
+    walkFrame: 0,
+    walkTimer: 0,
+    invincible: 0,
+    squash: 0,
+    rocket: 0,
+    punch: 0, // frames remaining in punch mode
+    punching: 0, // frames of current punch animation (0 = not punching)
+  };
+
+  if (currentLevel === 1) {
+    enemies = [
+      { type: 'walker', x: 10 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+      { type: 'walker', x: 22 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.7, alive: true, frame: 0 },
+      { type: 'spike', x: 28 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 35 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+      { type: 'walker', x: 42 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.6, alive: true, frame: 0 },
+      { type: 'spike', x: 48 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 53 * TILE, y: 7 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+      { type: 'walker', x: 62 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.8, alive: true, frame: 0 },
+      { type: 'spike', x: 67 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 77 * TILE, y: 7 * TILE - 12, w: 12, h: 12, vx: 0.5, alive: true, frame: 0 },
+      { type: 'walker', x: 84 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'walker', x: 91 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+    ];
+    tokens = [
+      { x: 6 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 19 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 26 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 34 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 44 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 51 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 59 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 69 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 77 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 83 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 8 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 20 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 40 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 60 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 80 * TILE + 4, y: 9 * TILE, collected: false },
+    ];
+  } else if (currentLevel === 2) {
+    // Level 2 - more enemies, faster, more spikes
+    enemies = [
+      { type: 'walker', x: 6 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.7, alive: true, frame: 0 },
+      { type: 'spike', x: 13 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 17 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.8, alive: true, frame: 0 },
+      { type: 'walker', x: 25 * TILE, y: 7 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'spike', x: 29 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 37 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.9, alive: true, frame: 0 },
+      { type: 'spike', x: 42 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 46 * TILE, y: 6 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+      { type: 'walker', x: 50 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.7, alive: true, frame: 0 },
+      { type: 'spike', x: 56 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 60 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'walker', x: 62 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -1.0, alive: true, frame: 0 },
+      { type: 'spike', x: 67 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 71 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: 0.5, alive: true, frame: 0 },
+      { type: 'spike', x: 75 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 83 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.8, alive: true, frame: 0 },
+      { type: 'walker', x: 88 * TILE, y: 8 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'spike', x: 92 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 95 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.9, alive: true, frame: 0 },
+    ];
+    tokens = [
+      { x: 10 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 15 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 24 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 32 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 41 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 46 * TILE + 4, y: 2 * TILE, collected: false },
+      { x: 53 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 58 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 66 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 71 * TILE + 4, y: 2 * TILE, collected: false },
+      { x: 78 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 84 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 88 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 96 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 36 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 60 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 80 * TILE + 4, y: 9 * TILE, collected: false },
+    ];
+  } else if (currentLevel === 3) {
+    // Level 3 - short lead-in, then boss arena
+    enemies = [
+      { type: 'walker', x: 6 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'spike', x: 13 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 17 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.7, alive: true, frame: 0 },
+      { type: 'walker', x: 25 * TILE, y: 6 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+    ];
+    tokens = [
+      { x: 5 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 9 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 15 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 25 * TILE + 4, y: 5 * TILE, collected: false },
+      // Arena tokens
+      { x: 34 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 40 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 46 * TILE + 4, y: 2 * TILE, collected: false },
+      { x: 52 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 57 * TILE + 4, y: 2 * TILE, collected: false },
+      { x: 64 * TILE + 4, y: 4 * TILE, collected: false },
+    ];
+    // Wizard spawns when player enters arena (col 30+)
+    wizard = null; // will be created on trigger
+  } else if (currentLevel === 4) {
+    // Level 4 - coin extravaganza! Minimal enemies, tons of coins and rockets
+    enemies = [
+      { type: 'walker', x: 15 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+      { type: 'walker', x: 45 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.6, alive: true, frame: 0 },
+      { type: 'walker', x: 75 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.5, alive: true, frame: 0 },
+    ];
+    tokens = [
+      // Ground coins
+      { x: 3 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 4 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 5 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 14 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 15 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 16 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 27 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 28 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 42 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 43 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 57 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 58 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 72 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 73 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 87 * TILE + 4, y: 9 * TILE, collected: false },
+      { x: 88 * TILE + 4, y: 9 * TILE, collected: false },
+      // Staircase coins
+      { x: 4 * TILE + 4, y: 8 * TILE, collected: false },
+      { x: 6 * TILE + 4, y: 7 * TILE, collected: false },
+      { x: 8 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 10 * TILE + 4, y: 5 * TILE, collected: false },
+      // Zigzag coins
+      { x: 15 * TILE + 4, y: 7 * TILE, collected: false },
+      { x: 18 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 21 * TILE + 4, y: 7 * TILE, collected: false },
+      { x: 24 * TILE + 4, y: 5 * TILE, collected: false },
+      // Floating island coins
+      { x: 29 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 31 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 35 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 36 * TILE + 4, y: 3 * TILE, collected: false },
+      // Bridge coins
+      { x: 39 * TILE + 4, y: 7 * TILE, collected: false },
+      { x: 41 * TILE + 4, y: 7 * TILE, collected: false },
+      { x: 44 * TILE + 4, y: 7 * TILE, collected: false },
+      { x: 46 * TILE + 4, y: 7 * TILE, collected: false },
+      // High platform coins
+      { x: 49 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 50 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 54 * TILE + 4, y: 2 * TILE, collected: false },
+      { x: 55 * TILE + 4, y: 2 * TILE, collected: false },
+      // Cascading coins
+      { x: 59 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 62 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 65 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 68 * TILE + 4, y: 3 * TILE, collected: false },
+      // Final stretch coins
+      { x: 73 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 77 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 81 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 85 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 89 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 93 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 97 * TILE + 4, y: 4 * TILE, collected: false },
+    ];
+  } else if (currentLevel === 5) {
+    // Level 5 - zombie boss arena with lead-in enemies
+    enemies = [
+      { type: 'walker', x: 5 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'spike', x: 8 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'walker', x: 14 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.7, alive: true, frame: 0 },
+    ];
+    tokens = [
+      { x: 5 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 9 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 22 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 30 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 38 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 46 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 54 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 62 * TILE + 4, y: 4 * TILE, collected: false },
+    ];
+    zombie = null; // will be created on trigger
+  } else if (currentLevel === 6) {
+    // Victory lap - no enemies, just coins everywhere!
+    enemies = [];
+    const coinList = [];
+    // Ground-level coins every 2 tiles across the whole level
+    for (let col = 2; col < 98; col += 2) {
+      coinList.push({ x: col * TILE + 4, y: 9 * TILE, collected: false });
+    }
+    // Platform coins
+    const platCoins = [
+      [5,6,7,8], [10,11,12,13], [16,17,18,19], [22,23,24,25],
+      [28,29,30,31], [33,34,35,36], [39,40,41,42], [45,46,47,48],
+      [51,52,53,54], [56,57,58,59], [62,63,64,65], [68,69,70,71],
+      [74,75,76,77], [79,80,81,82], [85,86,87,88], [91,92,93,94],
+    ];
+    const platRows = [8,7,6,5,7,8,6,5,7,8,6,5,7,8,6,5];
+    for (let p = 0; p < platCoins.length; p++) {
+      for (const col of platCoins[p]) {
+        coinList.push({ x: col * TILE + 4, y: (platRows[p] - 1) * TILE, collected: false });
+      }
+    }
+    // Extra coins floating in the air between platforms
+    for (let col = 3; col < 96; col += 3) {
+      coinList.push({ x: col * TILE + 4, y: 4 * TILE, collected: false });
+    }
+    tokens = coinList;
+  } else if (currentLevel === 7) {
+    // Mummy gauntlet - lots of mummies mixed with walkers and spikes
+    enemies = [
+      { type: 'mummy', x: 5 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.3, alive: true, frame: 0 },
+      { type: 'mummy', x: 11 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.35, alive: true, frame: 0 },
+      { type: 'walker', x: 15 * TILE, y: 7 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'mummy', x: 21 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.4, alive: true, frame: 0 },
+      { type: 'mummy', x: 24 * TILE, y: 6 * TILE - 12, w: 12, h: 12, vx: 0.3, alive: true, frame: 0 },
+      { type: 'spike', x: 27 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'mummy', x: 33 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.35, alive: true, frame: 0 },
+      { type: 'mummy', x: 36 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: 0.3, alive: true, frame: 0 },
+      { type: 'walker', x: 41 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.7, alive: true, frame: 0 },
+      { type: 'mummy', x: 45 * TILE, y: 8 * TILE - 12, w: 12, h: 12, vx: -0.4, alive: true, frame: 0 },
+      { type: 'mummy', x: 48 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: 0.3, alive: true, frame: 0 },
+      { type: 'spike', x: 52 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'mummy', x: 58 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.35, alive: true, frame: 0 },
+      { type: 'mummy', x: 61 * TILE, y: 6 * TILE - 12, w: 12, h: 12, vx: 0.3, alive: true, frame: 0 },
+      { type: 'walker', x: 64 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.8, alive: true, frame: 0 },
+      { type: 'mummy', x: 71 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.4, alive: true, frame: 0 },
+      { type: 'mummy', x: 75 * TILE, y: 7 * TILE - 12, w: 12, h: 12, vx: -0.3, alive: true, frame: 0 },
+      { type: 'spike', x: 78 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'mummy', x: 83 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.35, alive: true, frame: 0 },
+      { type: 'mummy', x: 87 * TILE, y: 6 * TILE - 12, w: 12, h: 12, vx: 0.3, alive: true, frame: 0 },
+      { type: 'mummy', x: 91 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.4, alive: true, frame: 0 },
+      { type: 'mummy', x: 95 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: 0.3, alive: true, frame: 0 },
+    ];
+    tokens = [
+      { x: 7 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 16 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 23 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 28 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 35 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 42 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 47 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 53 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 60 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 66 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 73 * TILE + 4, y: 6 * TILE, collected: false },
+      { x: 77 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 85 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 90 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 97 * TILE + 4, y: 4 * TILE, collected: false },
+    ];
+  } else if (currentLevel === 8) {
+    // Big walker level - large enemies that take 3 hits
+    enemies = [
+      { type: 'bigwalker', x: 6 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: -0.4, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'walker', x: 14 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.6, alive: true, frame: 0 },
+      { type: 'bigwalker', x: 20 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: 0.45, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'spike', x: 26 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'bigwalker', x: 34 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: -0.5, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'walker', x: 37 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: -0.6, alive: true, frame: 0 },
+      { type: 'bigwalker', x: 42 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: 0.4, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'mummy', x: 47 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: -0.35, alive: true, frame: 0 },
+      { type: 'bigwalker', x: 55 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: -0.45, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'spike', x: 60 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0, alive: true, frame: 0 },
+      { type: 'bigwalker', x: 63 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: 0.5, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'walker', x: 68 * TILE, y: 5 * TILE - 12, w: 12, h: 12, vx: -0.7, alive: true, frame: 0 },
+      { type: 'bigwalker', x: 74 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: -0.4, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'mummy', x: 82 * TILE, y: 10 * TILE - 12, w: 12, h: 12, vx: 0.35, alive: true, frame: 0 },
+      { type: 'bigwalker', x: 88 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: -0.5, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+      { type: 'bigwalker', x: 94 * TILE, y: 10 * TILE - 16, w: 18, h: 16, vx: 0.45, alive: true, frame: 0, hp: 3, maxHp: 3, flashTimer: 0 },
+    ];
+    tokens = [
+      { x: 9 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 16 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 25 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 30 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 36 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 44 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 48 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 56 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 62 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 69 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 76 * TILE + 4, y: 4 * TILE, collected: false },
+      { x: 84 * TILE + 4, y: 5 * TILE, collected: false },
+      { x: 90 * TILE + 4, y: 3 * TILE, collected: false },
+      { x: 96 * TILE + 4, y: 5 * TILE, collected: false },
+    ];
+  }
+
+  // No portal on boss levels (3 and 5)
+  if (currentLevel === 3 || currentLevel === 5) {
+    portal = null;
+  } else {
+    portal = { x: 97 * TILE, y: 7 * TILE, w: 16, h: 32 };
+  }
+
+  // Sprinkle clouds - each has a position, width, and falling sprinkle particles
+  if (currentLevel === 1) {
+    sprinkleClouds = [
+      { x: 37 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 75 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else if (currentLevel === 2) {
+    sprinkleClouds = [
+      { x: 48 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else if (currentLevel === 4) {
+    // Lots of rockets for the coin extravaganza!
+    sprinkleClouds = [
+      { x: 10 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 35 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 60 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 85 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else {
+    sprinkleClouds = [];
+  }
+  // Pre-populate sprinkles for each cloud
+  for (const cloud of sprinkleClouds) {
+    for (let i = 0; i < 12; i++) {
+      cloud.sprinkles.push({
+        x: cloud.x + Math.random() * cloud.w,
+        y: cloud.y + 10 + Math.random() * (GAME_H * 0.5),
+        speed: 0.3 + Math.random() * 0.5,
+        color: [COL.sprinkle, COL.sprinkle2, COL.sprinkle3][Math.floor(Math.random() * 3)],
+        size: 1 + Math.floor(Math.random() * 2),
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  // Punch clouds - level 2 and 3
+  if (currentLevel === 2) {
+    punchClouds = [
+      { x: 25 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 70 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else if (currentLevel === 3) {
+    punchClouds = [
+      { x: 15 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else if (currentLevel === 5) {
+    punchClouds = [
+      { x: 12 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else if (currentLevel === 7) {
+    punchClouds = [
+      { x: 8 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 50 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else if (currentLevel === 8) {
+    punchClouds = [
+      { x: 10 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 45 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+      { x: 80 * TILE, y: 2 * TILE, w: 40, used: false, sprinkles: [] },
+    ];
+  } else {
+    punchClouds = [];
+  }
+  for (const cloud of punchClouds) {
+    for (let i = 0; i < 12; i++) {
+      cloud.sprinkles.push({
+        x: cloud.x + Math.random() * cloud.w,
+        y: cloud.y + 10 + Math.random() * (GAME_H * 0.5),
+        speed: 0.3 + Math.random() * 0.5,
+        color: [COL.punchSprinkle, COL.punchSprinkle2, COL.punchSprinkle3][Math.floor(Math.random() * 3)],
+        size: 1 + Math.floor(Math.random() * 2),
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+}
+
+// ============================================================
+// PIXEL ART DRAWING
+// ============================================================
+
+function drawPixel(x, y, color) {
+  bctx.fillStyle = color;
+  bctx.fillRect(Math.floor(x), Math.floor(y), 1, 1);
+}
+
+function drawRect(x, y, w, h, color) {
+  bctx.fillStyle = color;
+  bctx.fillRect(Math.floor(x), Math.floor(y), w, h);
+}
+
+// Claude character sprite (based on reference image)
+// 14 wide, 14 tall pixel art
+const CLAUDE_SPRITE = [
+  '..oooooooo..',
+  '.oooooooooo.',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooEEooEEooo',
+  'oooEEooEEooo',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooDooooDooo',
+  '.oDDooooDD..',
+  '..DDooooDD..',
+  '..DD....DD..',
+];
+
+const CLAUDE_WALK = [
+  '..oooooooo..',
+  '.oooooooooo.',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooEEooEEooo',
+  'oooEEooEEooo',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooDooooDooo',
+  '..DDooooDD..',
+  '..DD....DD..',
+  '.DD......DD.',
+];
+
+const CLAUDE_JUMP = [
+  '..oooooooo..',
+  '.oooooooooo.',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooEEooEEooo',
+  'oooEEooEEooo',
+  'oooooooooooo',
+  'oooooooooooo',
+  'oooooooooooo',
+  '.ooDooooDooo',
+  '..DDooooDD..',
+  '...D....D...',
+];
+
+function drawSprite(sprite, x, y, flip) {
+  const sx = Math.floor(x);
+  const sy = Math.floor(y);
+  for (let row = 0; row < sprite.length; row++) {
+    const line = sprite[row];
+    for (let col = 0; col < line.length; col++) {
+      const ch = line[col];
+      if (ch === '.') continue;
+      let color;
+      if (ch === 'o') color = COL.claude;
+      else if (ch === 'D') color = COL.claudeDark;
+      else if (ch === 'L') color = COL.claudeLight;
+      else if (ch === 'E') color = COL.eyes;
+      else continue;
+      const px = flip ? sx + (line.length - 1 - col) : sx + col;
+      drawPixel(px, sy + row, color);
+    }
+  }
+}
+
+// Enemy sprites
+const WALKER_SPRITE = [
+  '....RRRR....',
+  '..RRRRRRRR..',
+  '.RRRRRRRRRR.',
+  'RRRRRRRRRRRR',
+  'RRRWWRRWWRRR',
+  'RRRWWRRWWRRR',
+  'RRRRRRRRRRRR',
+  'RRRRddddRRRR',
+  '.RRRRRRRRRR.',
+  '..RR....RR..',
+  '..RR....RR..',
+];
+
+const SPIKE_SPRITE = [
+  '......SS......',
+  '.....SSSS.....',
+  '....SSSSSS....',
+  '...SSSSSSSS...',
+  '..GGGGGGGGGG..',
+  '.GGGGGGGGGGGG.',
+  'GGGGGGGGGGGGGG',
+  'GGGWWGGGGWWGGG',
+  'GGGWWGGGGWWGGG',
+  'GGGGGGGGGGGGGG',
+  '.GGGGGGGGGGGG.',
+  '..GGGGGGGGGG..',
+];
+
+const MUMMY_SPRITE = [
+  '...MMMMMM...',
+  '..MMMMMMMM..',
+  '.MMMEEMMEEM.',
+  '.MMMMMMMMMM.',
+  '.MMMMmmMMMM.',
+  '.MMMMMMMMMM.',
+  '..mMMMMMm...',
+  '..MMMMMMMM..',
+  '.mMMMMMMMm..',
+  '..MMMMMMMM..',
+  '..MM....MM..',
+  '..MM....MM..',
+];
+
+const BIGWALKER_SPRITE = [
+  '......RRRRRR......',
+  '....RRRRRRRRRR....',
+  '..RRRRRRRRRRRRRR..',
+  '.RRRRRRRRRRRRRRRR.',
+  'RRRRRRRRRRRRRRRRRR',
+  'RRRRRRRRRRRRRRRRRR',
+  'RRRRWWWRRWWWRRRRR.',
+  'RRRRWWWRRWWWRRRRR.',
+  'RRRRRRRRRRRRRRRRRR',
+  'RRRRRRRRRRRRRRRRRR',
+  'RRRRRddddddRRRRRR',
+  '.RRRRRRRRRRRRRRRR.',
+  '..RRRRRRRRRRRRRR..',
+  '..RRRR....RRRR....',
+  '..RRRR....RRRR....',
+  '..RRR......RRR....',
+];
+
+function drawEnemySprite(sprite, x, y) {
+  const sx = Math.floor(x);
+  const sy = Math.floor(y);
+  for (let row = 0; row < sprite.length; row++) {
+    const line = sprite[row];
+    for (let col = 0; col < line.length; col++) {
+      const ch = line[col];
+      if (ch === '.') continue;
+      let color;
+      if (ch === 'R') color = COL.enemy1;
+      else if (ch === 'r') color = COL.enemy1Dark;
+      else if (ch === 'd') color = COL.enemy1Dark;
+      else if (ch === 'W' || ch === 'w') color = COL.enemy1Eyes;
+      else if (ch === 'G') color = COL.enemy2;
+      else if (ch === 'g') color = COL.enemy2Dark;
+      else if (ch === 'S') color = COL.enemy2Spike;
+      else if (ch === 'M') color = COL.mummy;
+      else if (ch === 'm') color = COL.mummyDark;
+      else if (ch === 'E') color = COL.mummyEyes;
+      else continue;
+      drawPixel(sx + col, sy + row, color);
+    }
+  }
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 3,
+      vy: (Math.random() - 1) * 3,
+      life: 20 + Math.random() * 20,
+      color,
+      size: 1 + Math.floor(Math.random() * 2),
+    });
+  }
+}
+
+function spawnFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y, text, color, life: 40 });
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.1;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const ft = floatingTexts[i];
+    ft.y -= 0.5;
+    ft.life--;
+    if (ft.life <= 0) floatingTexts.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const alpha = p.life / 40;
+    bctx.globalAlpha = alpha;
+    drawRect(p.x - cameraX, p.y, p.size, p.size, p.color);
+  }
+  bctx.globalAlpha = 1;
+  for (const ft of floatingTexts) {
+    const alpha = ft.life / 40;
+    bctx.globalAlpha = alpha;
+    bctx.font = '6px monospace';
+    bctx.fillStyle = ft.color;
+    bctx.fillText(ft.text, ft.x - cameraX, ft.y);
+  }
+  bctx.globalAlpha = 1;
+}
+
+// ============================================================
+// COLLISION
+// ============================================================
+function getTile(r, c) {
+  if (r < 0 || r >= LEVEL_ROWS || c < 0 || c >= LEVEL_COLS) return 0;
+  return levelMap[r][c];
+}
+
+function isSolid(r, c) {
+  const t = getTile(r, c);
+  return t === 1;
+}
+
+function isPlatform(r, c) {
+  return getTile(r, c) === 2;
+}
+
+function rectOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// ============================================================
+// PLAYER PHYSICS
+// ============================================================
+function updatePlayer() {
+  if (!player) return;
+
+  // Punch mode countdown
+  if (player.punch > 0) {
+    player.punch--;
+    if (player.punch === 0) {
+      spawnParticles(player.x + 6, player.y + 7, COL.punchSprinkle, 8);
+      spawnFloatingText(player.x, player.y - 10, 'POOF!', COL.punchSprinkle);
+      SFX.rocketEnd();
+    }
+    // Punch animation countdown
+    if (player.punching > 0) player.punching--;
+    // Trigger punch on key press (edge detection)
+    if (isPunch() && !punchPressed && player.punching === 0) {
+      player.punching = PUNCH_ANIM_LEN;
+      SFX.punch();
+    }
+  }
+  punchPressed = isPunch();
+
+  // Rocket mode countdown
+  if (player.rocket > 0) {
+    player.rocket--;
+    if (player.rocket === 0) {
+      // Transform back - spawn particles
+      spawnParticles(player.x + 6, player.y + 7, COL.sprinkle, 8);
+      spawnFloatingText(player.x, player.y - 10, 'POOF!', COL.sprinkle);
+      SFX.rocketEnd();
+    }
+  }
+
+  if (player.rocket > 0) {
+    // ROCKET MODE - fly with arrow keys
+    const ROCKET_SPEED = 2.5;
+    const ROCKET_ACCEL = 0.4;
+    if (isLeft()) {
+      player.vx -= ROCKET_ACCEL;
+      player.facing = -1;
+    } else if (isRight()) {
+      player.vx += ROCKET_ACCEL;
+      player.facing = 1;
+    }
+    if (isJump()) {
+      player.vy -= ROCKET_ACCEL;
+    } else if (isDown()) {
+      player.vy += ROCKET_ACCEL;
+    }
+    player.vx *= 0.92;
+    player.vy *= 0.92;
+    player.vx = Math.max(-ROCKET_SPEED, Math.min(ROCKET_SPEED, player.vx));
+    player.vy = Math.max(-ROCKET_SPEED, Math.min(ROCKET_SPEED, player.vy));
+
+    // Emit flame particles
+    if (frameCount % 2 === 0) {
+      spawnParticles(player.x + 6, player.y + player.h, COL.rocketFlame, 1);
+    }
+  } else {
+    // NORMAL MODE
+    // Horizontal movement
+    if (isLeft()) {
+      player.vx -= MOVE_SPEED * 0.3;
+      player.facing = -1;
+    } else if (isRight()) {
+      player.vx += MOVE_SPEED * 0.3;
+      player.facing = 1;
+    }
+    player.vx *= FRICTION;
+    if (Math.abs(player.vx) < 0.1) player.vx = 0;
+    player.vx = Math.max(-MOVE_SPEED, Math.min(MOVE_SPEED, player.vx));
+
+    // Jump
+    if (isJump() && player.onGround) {
+      player.vy = JUMP_FORCE;
+      player.onGround = false;
+      player.squash = -3;
+      SFX.jump();
+    }
+
+    // Gravity
+    player.vy += GRAVITY;
+    if (player.vy > 8) player.vy = 8;
+  }
+
+  // Squash recovery
+  if (player.squash !== 0) {
+    player.squash *= 0.7;
+    if (Math.abs(player.squash) < 0.5) player.squash = 0;
+  }
+
+  // Walk animation
+  if (player.onGround && Math.abs(player.vx) > 0.3) {
+    player.walkTimer++;
+    if (player.walkTimer > 8) {
+      player.walkTimer = 0;
+      player.walkFrame = (player.walkFrame + 1) % 2;
+    }
+  } else {
+    player.walkFrame = 0;
+    player.walkTimer = 0;
+  }
+
+  // Invincibility timer
+  if (player.invincible > 0) player.invincible--;
+
+  // Move X
+  player.x += player.vx;
+
+  // Clamp to level bounds
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.w > LEVEL_COLS * TILE) player.x = LEVEL_COLS * TILE - player.w;
+
+  // X collision with solid tiles
+  if (player.rocket <= 0) resolveCollisionX();
+
+  // Move Y
+  player.y += player.vy;
+
+  if (player.rocket > 0) {
+    // Clamp to screen in rocket mode
+    if (player.y < 0) { player.y = 0; player.vy = 0; }
+    if (player.y + player.h > GAME_H) { player.y = GAME_H - player.h; player.vy = 0; }
+  } else {
+    // Y collision
+    player.onGround = false;
+    resolveCollisionY();
+  }
+
+  // Fall into pit
+  if (player.y > GAME_H + 20) {
+    hurtPlayer(true);
+  }
+}
+
+function resolveCollisionX() {
+  const left = Math.floor(player.x / TILE);
+  const right = Math.floor((player.x + player.w - 1) / TILE);
+  const top = Math.floor(player.y / TILE);
+  const bottom = Math.floor((player.y + player.h - 1) / TILE);
+
+  for (let r = top; r <= bottom; r++) {
+    for (let c = left; c <= right; c++) {
+      if (isSolid(r, c)) {
+        if (player.vx > 0) {
+          player.x = c * TILE - player.w;
+          player.vx = 0;
+        } else if (player.vx < 0) {
+          player.x = (c + 1) * TILE;
+          player.vx = 0;
+        }
+      }
+    }
+  }
+}
+
+function resolveCollisionY() {
+  const left = Math.floor(player.x / TILE);
+  const right = Math.floor((player.x + player.w - 1) / TILE);
+  const top = Math.floor(player.y / TILE);
+  const bottom = Math.floor((player.y + player.h - 1) / TILE);
+
+  for (let r = top; r <= bottom; r++) {
+    for (let c = left; c <= right; c++) {
+      if (isSolid(r, c)) {
+        if (player.vy > 0) {
+          player.y = r * TILE - player.h;
+          player.vy = 0;
+          player.onGround = true;
+          if (player.squash === 0 && player.vy > 3) player.squash = 2;
+        } else if (player.vy < 0) {
+          player.y = (r + 1) * TILE;
+          player.vy = 0;
+        }
+      }
+      // Platform: only collide when falling and feet are near top
+      if (isPlatform(r, c) && player.vy >= 0) {
+        const platTop = r * TILE;
+        const playerBottom = player.y + player.h;
+        const prevBottom = playerBottom - player.vy;
+        if (prevBottom <= platTop + 2 && playerBottom >= platTop) {
+          player.y = platTop - player.h;
+          if (player.squash === 0 && player.vy > 3) player.squash = 2;
+          player.vy = 0;
+          player.onGround = true;
+        }
+      }
+    }
+  }
+}
+
+function hurtPlayer(fell) {
+  if (player.invincible > 0 && !fell) return;
+  lives--;
+  shakeTimer = 6;
+  spawnParticles(player.x, player.y, COL.claude, 10);
+  if (lives <= 0) {
+    gameState = 'gameover';
+    deathTimer = 60;
+    stopMusic();
+    SFX.gameOver();
+  } else {
+    SFX.hurt();
+    // Respawn
+    player.x = Math.max(0, cameraX + 20);
+    player.y = 4 * TILE;
+    player.vx = 0;
+    player.vy = 0;
+    player.invincible = 90;
+  }
+}
+
+// ============================================================
+// ENEMIES
+// ============================================================
+function updateEnemies() {
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    e.frame++;
+
+    if (e.type === 'walker' || e.type === 'mummy' || e.type === 'bigwalker') {
+      e.x += e.vx;
+      // Reverse at edges or walls
+      const halfW = e.type === 'bigwalker' ? 9 : 6;
+      const col = Math.floor((e.x + halfW) / TILE);
+      const row = Math.floor((e.y + e.h) / TILE);
+      if (isSolid(row, col + (e.vx > 0 ? 1 : -1)) || !isSolid(row + 1, col)) {
+        const aheadCol = e.vx > 0 ? col + 1 : col - 1;
+        if (isSolid(Math.floor(e.y / TILE), aheadCol) || (!isSolid(row, aheadCol) && !getTile(row, aheadCol))) {
+          e.vx *= -1;
+        }
+      }
+      // Flash timer for bigwalker
+      if (e.type === 'bigwalker' && e.flashTimer > 0) e.flashTimer--;
+    }
+
+    // Check collision with player
+    if (!player || player.invincible > 0) continue;
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+    const eBox = { x: e.x, y: e.y, w: e.w, h: e.h };
+
+    // Check punch hitbox first
+    if (player.punch > 0 && player.punching > 4 && (e.type === 'walker' || e.type === 'mummy' || e.type === 'bigwalker')) {
+      const punchReach = 10;
+      const fistX = player.facing > 0 ? player.x + player.w : player.x - punchReach;
+      const fistBox = { x: fistX, y: player.y + 2, w: punchReach, h: player.h - 4 };
+      if (rectOverlap(fistBox, eBox)) {
+        if (e.type === 'bigwalker') {
+          e.hp--;
+          e.flashTimer = 8;
+          spawnParticles(e.x + 9, e.y + 8, COL.enemy1, 6);
+          spawnFloatingText(e.x, e.y - 8, '-HP', COL.enemy1);
+          SFX.punchHit();
+          if (e.hp <= 0) {
+            e.alive = false;
+            score += 300;
+            spawnParticles(e.x + 9, e.y + 8, COL.enemy1, 15);
+            spawnFloatingText(e.x, e.y - 8, '+300', COL.token);
+          }
+        } else {
+          e.alive = false;
+          score += e.type === 'mummy' ? 180 : 120;
+          spawnParticles(e.x + 6, e.y + 6, e.type === 'mummy' ? COL.mummy : COL.enemy1, 10);
+          spawnFloatingText(e.x, e.y - 8, e.type === 'mummy' ? '+180' : '+120', COL.token);
+          SFX.punchHit();
+        }
+        continue;
+      }
+    }
+
+    if (rectOverlap(pBox, eBox)) {
+      if (player.rocket > 0) {
+        // Rocket still takes damage from enemies - dodge them!
+        hurtPlayer(false);
+      } else if (player.vy > 0 && player.y + player.h - player.vy <= e.y + 4) {
+        // Player stomping from above?
+        if (e.type === 'walker' || e.type === 'mummy' || e.type === 'bigwalker') {
+          if (e.type === 'bigwalker') {
+            e.hp--;
+            e.flashTimer = 8;
+            player.vy = JUMP_FORCE * 0.6;
+            spawnParticles(e.x + 9, e.y + 8, COL.enemy1, 6);
+            spawnFloatingText(e.x, e.y - 8, '-HP', COL.enemy1);
+            SFX.stomp();
+            if (e.hp <= 0) {
+              e.alive = false;
+              score += 250;
+              spawnParticles(e.x + 9, e.y + 8, COL.enemy1, 15);
+              spawnFloatingText(e.x, e.y - 8, '+250', COL.token);
+            }
+          } else {
+            // Stomp! Kill enemy
+            e.alive = false;
+            player.vy = JUMP_FORCE * 0.6;
+            score += e.type === 'mummy' ? 150 : 100;
+            spawnParticles(e.x + 6, e.y + 6, e.type === 'mummy' ? COL.mummy : COL.enemy1, 8);
+            spawnFloatingText(e.x, e.y - 8, e.type === 'mummy' ? '+150' : '+100', COL.token);
+            SFX.stomp();
+          }
+        } else {
+          // Spike enemy can't be stomped
+          hurtPlayer(false);
+        }
+      } else {
+        hurtPlayer(false);
+      }
+    }
+  }
+}
+
+// ============================================================
+// TOKENS & PORTAL
+// ============================================================
+function updateTokens() {
+  for (const t of tokens) {
+    if (t.collected) continue;
+    const tBox = { x: t.x, y: t.y, w: 8, h: 8 };
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+    if (rectOverlap(pBox, tBox)) {
+      t.collected = true;
+      score += 50;
+      spawnParticles(t.x + 4, t.y + 4, COL.token, 6);
+      spawnFloatingText(t.x, t.y - 8, '+50', COL.token);
+      SFX.coin();
+    }
+  }
+
+  // Portal
+  if (portal) {
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+    const gBox = { x: portal.x, y: portal.y, w: portal.w, h: portal.h };
+    if (rectOverlap(pBox, gBox)) {
+      if (currentLevel < MAX_LEVEL) {
+        gameState = 'levelcomplete';
+        winTimer = 0;
+      } else {
+        gameState = 'win';
+        winTimer = 0;
+      }
+      spawnParticles(portal.x + 8, portal.y + 16, COL.portal, 20);
+      stopMusic();
+      SFX.win();
+    }
+  }
+}
+
+// ============================================================
+// SPRINKLE CLOUDS
+// ============================================================
+function updateSprinkleClouds() {
+  for (const cloud of sprinkleClouds) {
+    // Animate sprinkles falling
+    for (const s of cloud.sprinkles) {
+      s.y += s.speed;
+      s.x += Math.sin(frameCount * 0.03 + s.phase) * 0.3;
+      // Reset sprinkle to top when it falls too far
+      if (s.y > cloud.y + GAME_H * 0.55) {
+        s.y = cloud.y + 8;
+        s.x = cloud.x + Math.random() * cloud.w;
+      }
+    }
+
+    if (cloud.used) continue;
+
+    // Check if player walks through the sprinkle zone
+    const zoneBox = { x: cloud.x, y: cloud.y, w: cloud.w, h: GAME_H * 0.55 };
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+    if (rectOverlap(pBox, zoneBox) && player.rocket <= 0) {
+      cloud.used = true;
+      player.rocket = ROCKET_DURATION;
+      spawnParticles(player.x + 6, player.y + 7, COL.sprinkle, 15);
+      spawnParticles(player.x + 6, player.y + 7, COL.sprinkle2, 10);
+      spawnFloatingText(player.x - 8, player.y - 12, 'ROCKET!', COL.rocketFlame2);
+      SFX.rocket();
+    }
+  }
+}
+
+function drawSprinkleClouds() {
+  for (const cloud of sprinkleClouds) {
+    const cx = Math.floor(cloud.x - cameraX);
+    const cy = Math.floor(cloud.y);
+
+    if (cx < -60 || cx > GAME_W + 20) continue;
+
+    // Draw sprinkles (rain down even if cloud is used, for visual effect)
+    if (!cloud.used) {
+      for (const s of cloud.sprinkles) {
+        const sx = Math.floor(s.x - cameraX);
+        const sy = Math.floor(s.y);
+        bctx.globalAlpha = 0.7;
+        drawRect(sx, sy, s.size, s.size, s.color);
+      }
+      bctx.globalAlpha = 1;
+    }
+
+    // Draw cloud
+    const cloudAlpha = cloud.used ? 0.3 : 1;
+    bctx.globalAlpha = cloudAlpha;
+    // Cloud shape: rounded puffy shape
+    drawRect(cx + 4, cy, cloud.w - 8, 4, COL.cloud);
+    drawRect(cx, cy + 2, cloud.w, 6, COL.cloud);
+    drawRect(cx + 4, cy + 8, cloud.w - 8, 2, COL.cloud);
+    // Cloud highlights
+    drawRect(cx + 6, cy + 1, 8, 2, '#eeeeff');
+    // Cloud shadow
+    drawRect(cx + 2, cy + 7, cloud.w - 4, 2, COL.cloudDark);
+    bctx.globalAlpha = 1;
+  }
+}
+
+function updatePunchClouds() {
+  for (const cloud of punchClouds) {
+    for (const s of cloud.sprinkles) {
+      s.y += s.speed;
+      s.x += Math.sin(frameCount * 0.03 + s.phase) * 0.3;
+      if (s.y > cloud.y + GAME_H * 0.55) {
+        s.y = cloud.y + 8;
+        s.x = cloud.x + Math.random() * cloud.w;
+      }
+    }
+    if (cloud.used) continue;
+    const zoneBox = { x: cloud.x, y: cloud.y, w: cloud.w, h: GAME_H * 0.55 };
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+    if (rectOverlap(pBox, zoneBox) && player.punch <= 0 && player.rocket <= 0) {
+      cloud.used = true;
+      player.punch = PUNCH_DURATION;
+      spawnParticles(player.x + 6, player.y + 7, COL.punchSprinkle, 15);
+      spawnParticles(player.x + 6, player.y + 7, COL.punchSprinkle2, 10);
+      spawnFloatingText(player.x - 8, player.y - 12, 'PUNCH!', COL.glove);
+      SFX.rocket();
+    }
+  }
+}
+
+function drawPunchClouds() {
+  for (const cloud of punchClouds) {
+    const cx = Math.floor(cloud.x - cameraX);
+    const cy = Math.floor(cloud.y);
+    if (cx < -60 || cx > GAME_W + 20) continue;
+    if (!cloud.used) {
+      for (const s of cloud.sprinkles) {
+        const sx = Math.floor(s.x - cameraX);
+        const sy = Math.floor(s.y);
+        bctx.globalAlpha = 0.7;
+        drawRect(sx, sy, s.size, s.size, s.color);
+      }
+      bctx.globalAlpha = 1;
+    }
+    const cloudAlpha = cloud.used ? 0.3 : 1;
+    bctx.globalAlpha = cloudAlpha;
+    drawRect(cx + 4, cy, cloud.w - 8, 4, COL.punchCloud);
+    drawRect(cx, cy + 2, cloud.w, 6, COL.punchCloud);
+    drawRect(cx + 4, cy + 8, cloud.w - 8, 2, COL.punchCloud);
+    drawRect(cx + 6, cy + 1, 8, 2, '#ffeeee');
+    drawRect(cx + 2, cy + 7, cloud.w - 4, 2, COL.punchCloudDark);
+    // Small glove icon on cloud
+    if (!cloud.used) {
+      drawRect(cx + 16, cy + 3, 6, 4, COL.glove);
+      drawRect(cx + 17, cy + 2, 4, 1, COL.gloveDark);
+    }
+    bctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// WIZARD BOSS
+// ============================================================
+const WIZARD_HP = 3;
+const WIZARD_TELEPORT_TIME = 120;
+const WIZARD_VISIBLE_TIME = 180; // longer visible window to hit him
+const WIZARD_SHOOT_DELAY = 60; // slower to start shooting
+
+function createWizard() {
+  return {
+    x: 50 * TILE, y: 4 * TILE,
+    w: 14, h: 18,
+    hp: WIZARD_HP,
+    maxHp: WIZARD_HP,
+    state: 'appearing', // appearing, visible, disappearing, hidden, dead
+    timer: 30,
+    shootTimer: WIZARD_SHOOT_DELAY,
+    flashTimer: 0,
+    deathTimer: 0,
+    // Possible positions to teleport to
+    positions: [
+      { x: 33 * TILE, y: 7 * TILE - 18 },  // on platform [7, 32, 35]
+      { x: 39 * TILE, y: 5 * TILE - 18 },  // on platform [5, 38, 41]
+      { x: 45 * TILE, y: 3 * TILE - 18 },  // on platform [3, 45, 48]
+      { x: 51 * TILE, y: 5 * TILE - 18 },  // on platform [5, 50, 53]
+      { x: 56 * TILE, y: 3 * TILE - 18 },  // on platform [3, 55, 58]
+      { x: 45 * TILE, y: 7 * TILE - 18 },  // on platform [7, 44, 47]
+      { x: 57 * TILE, y: 7 * TILE - 18 },  // on platform [7, 56, 59]
+      { x: 63 * TILE, y: 5 * TILE - 18 },  // on platform [5, 62, 65]
+      { x: 40 * TILE, y: 10 * TILE - 18 }, // on ground
+      { x: 58 * TILE, y: 10 * TILE - 18 }, // on ground
+    ],
+    lastPos: -1,
+  };
+}
+
+function updateWizard() {
+  if (!wizard) return;
+
+  // Handle death animation
+  if (wizard.state === 'dead') {
+    wizard.deathTimer--;
+    if (wizard.deathTimer > 80 && frameCount % 4 === 0) {
+      spawnParticles(wizard.x + Math.random() * 14, wizard.y + Math.random() * 18, COL.wizardBolt, 3);
+    }
+    if (wizard.deathTimer <= 0) {
+      if (currentLevel < MAX_LEVEL) {
+        gameState = 'levelcomplete';
+      } else {
+        gameState = 'win';
+      }
+      winTimer = 0;
+      stopMusic();
+      SFX.win();
+    }
+    return;
+  }
+
+  wizard.timer--;
+  if (wizard.flashTimer > 0) wizard.flashTimer--;
+
+  if (wizard.state === 'appearing') {
+    if (wizard.timer <= 0) {
+      wizard.state = 'visible';
+      wizard.timer = WIZARD_VISIBLE_TIME;
+      wizard.shootTimer = WIZARD_SHOOT_DELAY;
+      SFX.wizardAppear();
+    }
+  } else if (wizard.state === 'visible') {
+    // Shoot bolts at player
+    wizard.shootTimer--;
+    if (wizard.shootTimer <= 0) {
+      shootBolt();
+      // Shoot faster when low HP
+      const speedup = wizard.hp <= 1 ? 0.7 : 1;
+      wizard.shootTimer = Math.floor((45 + Math.random() * 30) * speedup);
+    }
+    if (wizard.timer <= 0) {
+      wizard.state = 'disappearing';
+      wizard.timer = 20;
+    }
+  } else if (wizard.state === 'disappearing') {
+    if (wizard.timer <= 0) {
+      wizard.state = 'hidden';
+      // Shorter hidden time when low HP
+      const hideMult = wizard.hp <= 1 ? 0.6 : 1;
+      wizard.timer = Math.floor((30 + Math.random() * 30) * hideMult);
+    }
+  } else if (wizard.state === 'hidden') {
+    if (wizard.timer <= 0) {
+      // Teleport to new position
+      let newPos;
+      do {
+        newPos = Math.floor(Math.random() * wizard.positions.length);
+      } while (newPos === wizard.lastPos);
+      wizard.lastPos = newPos;
+      wizard.x = wizard.positions[newPos].x;
+      wizard.y = wizard.positions[newPos].y;
+      wizard.state = 'appearing';
+      wizard.timer = 20;
+      spawnParticles(wizard.x + 7, wizard.y + 9, COL.wizardShield, 6);
+    }
+  }
+
+  // Check if player stomps or punches wizard when visible
+  if (wizard.state === 'visible' && player && player.invincible <= 0) {
+    const wBox = { x: wizard.x, y: wizard.y, w: wizard.w, h: wizard.h };
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+
+    // Punch hit
+    if (player.punch > 0 && player.punching > 4) {
+      const punchReach = 10;
+      const fistX = player.facing > 0 ? player.x + player.w : player.x - punchReach;
+      const fistBox = { x: fistX, y: player.y + 2, w: punchReach, h: player.h - 4 };
+      if (rectOverlap(fistBox, wBox)) {
+        hitWizard();
+      }
+    }
+
+    // Stomp from above
+    if (rectOverlap(pBox, wBox)) {
+      if (player.vy > 0 && player.y + player.h - player.vy <= wizard.y + 4) {
+        player.vy = JUMP_FORCE * 0.7;
+        hitWizard();
+      } else {
+        hurtPlayer(false);
+      }
+    }
+  }
+
+  // Update bolts
+  for (let i = wizardBolts.length - 1; i >= 0; i--) {
+    const b = wizardBolts[i];
+    b.x += b.vx;
+    b.y += b.vy;
+    b.life--;
+
+    // Hit player?
+    if (player && player.invincible <= 0) {
+      const bBox = { x: b.x - 3, y: b.y - 3, w: 6, h: 6 };
+      const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+      if (rectOverlap(bBox, pBox)) {
+        hurtPlayer(false);
+        wizardBolts.splice(i, 1);
+        continue;
+      }
+    }
+
+    if (b.life <= 0 || b.x < cameraX - 20 || b.x > cameraX + GAME_W + 20 || b.y > GAME_H + 20) {
+      wizardBolts.splice(i, 1);
+    }
+  }
+}
+
+function shootBolt() {
+  if (!player || !wizard) return;
+  const dx = player.x - wizard.x;
+  const dy = player.y - wizard.y;
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+  const speed = wizard.hp <= 1 ? 1.8 : 1.3;
+  wizardBolts.push({
+    x: wizard.x + 7,
+    y: wizard.y + 9,
+    vx: (dx / dist) * speed,
+    vy: (dy / dist) * speed,
+    life: 180,
+  });
+  SFX.wizardShoot();
+}
+
+function hitWizard() {
+  wizard.hp--;
+  wizard.flashTimer = 8;
+  score += 200;
+  spawnParticles(wizard.x + 7, wizard.y + 9, COL.wizardShield, 8);
+  spawnFloatingText(wizard.x, wizard.y - 10, '-HP', COL.wizardBolt);
+  SFX.wizardHit();
+
+  if (wizard.hp <= 0) {
+    wizard.state = 'dead';
+    wizard.deathTimer = 120;
+    score += 500;
+    spawnParticles(wizard.x + 7, wizard.y + 9, COL.wizard, 20);
+    spawnParticles(wizard.x + 7, wizard.y + 9, COL.wizardBolt, 15);
+    spawnFloatingText(wizard.x - 4, wizard.y - 16, '+500', COL.token);
+    SFX.wizardDeath();
+    wizardBolts = [];
+  } else {
+    // Teleport away immediately after being hit
+    wizard.state = 'disappearing';
+    wizard.timer = 10;
+  }
+}
+
+function drawWizard() {
+  if (!wizard) return;
+
+  if (wizard.state === 'dead') return;
+
+  if (wizard.state === 'hidden') return;
+
+  const wx = Math.floor(wizard.x - cameraX);
+  const wy = Math.floor(wizard.y);
+
+  // Alpha for appearing/disappearing
+  let alpha = 1;
+  if (wizard.state === 'appearing') {
+    alpha = 1 - (wizard.timer / 20);
+  } else if (wizard.state === 'disappearing') {
+    alpha = wizard.timer / 20;
+  }
+
+  // Flash white when hit
+  const flashWhite = wizard.flashTimer > 0 && frameCount % 4 < 2;
+
+  bctx.globalAlpha = alpha;
+
+  if (flashWhite) {
+    // All white flash
+    drawRect(wx, wy - 4, 14, 4, '#fff');
+    drawRect(wx + 2, wy - 6, 10, 2, '#fff');
+    drawRect(wx + 4, wy - 8, 6, 2, '#fff');
+    drawRect(wx - 1, wy, 16, 14, '#fff');
+    drawRect(wx + 1, wy + 14, 5, 4, '#fff');
+    drawRect(wx + 8, wy + 14, 5, 4, '#fff');
+  } else {
+    // Hat
+    drawRect(wx, wy - 4, 14, 4, COL.wizardHatBrim);
+    drawRect(wx + 2, wy - 6, 10, 2, COL.wizardHat);
+    drawRect(wx + 4, wy - 8, 6, 2, COL.wizardHat);
+    // Hat tip star
+    drawPixel(wx + 6, wy - 9, COL.wizardBolt);
+    drawPixel(wx + 7, wy - 9, COL.wizardBolt);
+    // Body/robe
+    drawRect(wx + 1, wy, 12, 12, COL.wizard);
+    drawRect(wx, wy + 2, 14, 8, COL.wizard);
+    // Eyes
+    drawRect(wx + 3, wy + 3, 2, 2, COL.wizardEyes);
+    drawRect(wx + 9, wy + 3, 2, 2, COL.wizardEyes);
+    // Robe bottom
+    drawRect(wx, wy + 10, 14, 4, COL.wizardDark);
+    // Feet
+    drawRect(wx + 1, wy + 14, 4, 3, COL.wizardDark);
+    drawRect(wx + 9, wy + 14, 4, 3, COL.wizardDark);
+    // Robe detail
+    drawRect(wx + 6, wy + 6, 2, 6, COL.wizardDark);
+  }
+
+  bctx.globalAlpha = 1;
+
+  // Draw HP bar above wizard
+  if (wizard.state === 'visible' || wizard.state === 'appearing') {
+    bctx.globalAlpha = alpha;
+    const hpW = 20;
+    const hpX = wx + 7 - hpW / 2;
+    const hpY = wy - 14;
+    drawRect(hpX - 1, hpY - 1, hpW + 2, 4, '#000');
+    drawRect(hpX, hpY, Math.ceil(hpW * (wizard.hp / wizard.maxHp)), 2, COL.wizardEyes);
+    bctx.globalAlpha = 1;
+  }
+}
+
+function drawWizardBolts() {
+  for (const b of wizardBolts) {
+    const bx = Math.floor(b.x - cameraX);
+    const by = Math.floor(b.y);
+    // Glowing bolt
+    bctx.globalAlpha = 0.3;
+    drawRect(bx - 3, by - 3, 7, 7, COL.wizardBolt);
+    bctx.globalAlpha = 1;
+    drawRect(bx - 1, by - 1, 3, 3, COL.wizardBolt);
+    drawPixel(bx, by, COL.wizardBolt2);
+    // Trail
+    drawRect(bx - b.vx * 2 - 1, by - b.vy * 2 - 1, 2, 2, COL.wizardBolt2);
+  }
+}
+
+// ============================================================
+// ZOMBIE BOSS (Level 5)
+// ============================================================
+const ZOMBIE_HP = 5;
+const ZOMBIE_W = 24;
+const ZOMBIE_H = 28;
+
+function createZombie() {
+  return {
+    x: 50 * TILE, y: 10 * TILE - ZOMBIE_H,
+    w: ZOMBIE_W, h: ZOMBIE_H,
+    hp: ZOMBIE_HP,
+    maxHp: ZOMBIE_HP,
+    state: 'walking', // walking, charging, slamming, stunned, dead
+    timer: 60,
+    facing: -1,
+    vx: 0,
+    flashTimer: 0,
+    deathTimer: 0,
+    slamWarning: 0,
+  };
+}
+
+function updateZombie() {
+  if (!zombie) return;
+
+  // Death animation
+  if (zombie.state === 'dead') {
+    zombie.deathTimer--;
+    if (zombie.deathTimer > 80 && frameCount % 4 === 0) {
+      spawnParticles(zombie.x + Math.random() * ZOMBIE_W, zombie.y + Math.random() * ZOMBIE_H, COL.zombie, 3);
+    }
+    if (zombie.deathTimer <= 0) {
+      if (currentLevel < MAX_LEVEL) {
+        gameState = 'levelcomplete';
+      } else {
+        gameState = 'win';
+      }
+      winTimer = 0;
+      stopMusic();
+      SFX.win();
+    }
+    return;
+  }
+
+  zombie.timer--;
+  if (zombie.flashTimer > 0) zombie.flashTimer--;
+
+  if (zombie.state === 'walking') {
+    // Walk toward player
+    zombie.facing = player.x < zombie.x ? -1 : 1;
+    const speed = zombie.hp <= 2 ? 0.8 : 0.5;
+    zombie.vx = zombie.facing * speed;
+    zombie.x += zombie.vx;
+
+    // Keep on ground
+    zombie.y = 10 * TILE - ZOMBIE_H;
+
+    // Decide next attack
+    if (zombie.timer <= 0) {
+      const dist = Math.abs(player.x - zombie.x);
+      if (dist < 60) {
+        // Close: ground slam
+        zombie.state = 'slamming';
+        zombie.timer = 40;
+        zombie.slamWarning = 20;
+      } else {
+        // Far: charge
+        zombie.state = 'charging';
+        zombie.timer = 60;
+        zombie.facing = player.x < zombie.x ? -1 : 1;
+        SFX.zombieRoar();
+      }
+    }
+  } else if (zombie.state === 'charging') {
+    // Rush toward player
+    const speed = zombie.hp <= 2 ? 2.5 : 2.0;
+    zombie.vx = zombie.facing * speed;
+    zombie.x += zombie.vx;
+
+    // Keep on ground
+    zombie.y = 10 * TILE - ZOMBIE_H;
+
+    if (zombie.timer <= 0) {
+      zombie.state = 'stunned';
+      zombie.timer = 50;
+      zombie.vx = 0;
+      SFX.zombieStomp();
+    }
+  } else if (zombie.state === 'slamming') {
+    zombie.vx = 0;
+    zombie.slamWarning--;
+
+    if (zombie.slamWarning <= 0 && zombie.timer === 20) {
+      // Slam hits - create shockwave
+      SFX.zombieStomp();
+      shakeTimer = 8;
+      // Damage player if on ground and nearby
+      if (player && player.onGround && Math.abs(player.x - zombie.x) < 50) {
+        hurtPlayer(false);
+      }
+      spawnParticles(zombie.x + ZOMBIE_W / 2, 10 * TILE, COL.zombieSlam, 10);
+    }
+
+    if (zombie.timer <= 0) {
+      zombie.state = 'walking';
+      zombie.timer = 60 + Math.floor(Math.random() * 40);
+    }
+  } else if (zombie.state === 'stunned') {
+    zombie.vx = 0;
+    if (zombie.timer <= 0) {
+      zombie.state = 'walking';
+      zombie.timer = 40 + Math.floor(Math.random() * 30);
+    }
+  }
+
+  // Clamp position to level bounds
+  zombie.x = Math.max(15 * TILE, Math.min(zombie.x, 65 * TILE));
+
+  // Collision with player
+  if (player && player.invincible <= 0) {
+    const zBox = { x: zombie.x, y: zombie.y, w: zombie.w, h: zombie.h };
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+
+    // Punch hit
+    if (player.punch > 0 && player.punching > 4) {
+      const punchReach = 10;
+      const fistX = player.facing > 0 ? player.x + player.w : player.x - punchReach;
+      const fistBox = { x: fistX, y: player.y + 2, w: punchReach, h: player.h - 4 };
+      if (rectOverlap(fistBox, zBox)) {
+        hitZombie();
+      }
+    }
+
+    // Stomp from above
+    if (rectOverlap(pBox, zBox)) {
+      if (player.vy > 0 && player.y + player.h - player.vy <= zombie.y + 4) {
+        player.vy = JUMP_FORCE * 0.7;
+        hitZombie();
+      } else if (zombie.state !== 'stunned') {
+        hurtPlayer(false);
+      }
+    }
+  }
+}
+
+function hitZombie() {
+  zombie.hp--;
+  zombie.flashTimer = 8;
+  score += 200;
+  spawnParticles(zombie.x + ZOMBIE_W / 2, zombie.y + ZOMBIE_H / 2, COL.zombieLight, 8);
+  spawnFloatingText(zombie.x, zombie.y - 10, '-HP', COL.zombieEyes);
+  SFX.zombieHit();
+
+  if (zombie.hp <= 0) {
+    zombie.state = 'dead';
+    zombie.deathTimer = 120;
+    score += 1000;
+    spawnParticles(zombie.x + ZOMBIE_W / 2, zombie.y + ZOMBIE_H / 2, COL.zombie, 25);
+    spawnParticles(zombie.x + ZOMBIE_W / 2, zombie.y + ZOMBIE_H / 2, COL.zombieLight, 15);
+    spawnFloatingText(zombie.x, zombie.y - 16, '+1000', COL.token);
+    SFX.zombieDeath();
+  } else {
+    // Stun briefly after hit
+    zombie.state = 'stunned';
+    zombie.timer = 40;
+    zombie.vx = 0;
+  }
+}
+
+function drawZombie() {
+  if (!zombie) return;
+  if (zombie.state === 'dead' && zombie.deathTimer <= 80) return;
+
+  const zx = Math.floor(zombie.x - cameraX);
+  const zy = Math.floor(zombie.y);
+
+  const flashWhite = zombie.flashTimer > 0 && frameCount % 4 < 2;
+  const col = flashWhite ? '#fff' : COL.zombie;
+  const colDark = flashWhite ? '#fff' : COL.zombieDark;
+  const colLight = flashWhite ? '#fff' : COL.zombieLight;
+  const colEyes = flashWhite ? '#fff' : COL.zombieEyes;
+  const colTeeth = flashWhite ? '#fff' : COL.zombieTeeth;
+
+  // Slam warning - zombie raises arms
+  const slamming = zombie.state === 'slamming' && zombie.slamWarning > 0;
+
+  // Body
+  drawRect(zx + 4, zy + 6, 16, 16, col);
+  drawRect(zx + 2, zy + 8, 20, 12, col);
+
+  // Head
+  drawRect(zx + 6, zy, 12, 8, col);
+  drawRect(zx + 4, zy + 2, 16, 6, col);
+
+  // Eyes (red, glowing)
+  drawRect(zx + 7, zy + 3, 3, 2, colEyes);
+  drawRect(zx + 14, zy + 3, 3, 2, colEyes);
+
+  // Mouth/teeth
+  drawRect(zx + 9, zy + 6, 6, 2, colDark);
+  drawPixel(zx + 10, zy + 6, colTeeth);
+  drawPixel(zx + 12, zy + 6, colTeeth);
+  drawPixel(zx + 14, zy + 6, colTeeth);
+
+  // Arms
+  if (slamming) {
+    // Arms raised
+    drawRect(zx, zy - 2, 4, 10, colLight);
+    drawRect(zx + 20, zy - 2, 4, 10, colLight);
+  } else if (zombie.state === 'charging') {
+    // Arms forward
+    const armDir = zombie.facing > 0 ? 1 : -1;
+    if (armDir > 0) {
+      drawRect(zx + 22, zy + 8, 6, 4, colLight);
+    } else {
+      drawRect(zx - 4, zy + 8, 6, 4, colLight);
+    }
+    drawRect(zx, zy + 8, 4, 8, colLight);
+    drawRect(zx + 20, zy + 8, 4, 8, colLight);
+  } else {
+    // Arms at sides
+    drawRect(zx, zy + 8, 4, 10, colLight);
+    drawRect(zx + 20, zy + 8, 4, 10, colLight);
+  }
+
+  // Legs
+  drawRect(zx + 5, zy + 22, 5, 6, colDark);
+  drawRect(zx + 14, zy + 22, 5, 6, colDark);
+
+  // Stitches / detail
+  drawPixel(zx + 11, zy + 2, colDark);
+  drawPixel(zx + 11, zy + 3, colDark);
+  drawRect(zx + 8, zy + 12, 8, 1, colDark);
+
+  // Stunned stars
+  if (zombie.state === 'stunned') {
+    const starOff = Math.sin(frameCount * 0.15) * 3;
+    drawPixel(zx + 8 + starOff, zy - 4, COL.token);
+    drawPixel(zx + 16 - starOff, zy - 3, COL.token);
+    drawPixel(zx + 12, zy - 5 + Math.abs(starOff) * 0.5, COL.token);
+  }
+
+  // Slam shockwave visual
+  if (zombie.state === 'slamming' && zombie.slamWarning <= 0 && zombie.timer > 15) {
+    const wave = (20 - zombie.timer) * 3;
+    bctx.globalAlpha = 0.3;
+    drawRect(zx + ZOMBIE_W / 2 - wave, 10 * TILE - 2, wave * 2, 2, COL.zombieSlam);
+    bctx.globalAlpha = 1;
+  }
+
+  // HP bar
+  const hpW = 28;
+  const hpX = zx + ZOMBIE_W / 2 - hpW / 2;
+  const hpY = zy - 8;
+  drawRect(hpX - 1, hpY - 1, hpW + 2, 4, '#000');
+  drawRect(hpX, hpY, Math.ceil(hpW * (zombie.hp / zombie.maxHp)), 2, COL.zombieEyes);
+}
+
+// ============================================================
+// CAMERA
+// ============================================================
+function updateCamera() {
+  const targetX = player.x - GAME_W / 3;
+  cameraX += (targetX - cameraX) * 0.1;
+  cameraX = Math.max(0, Math.min(cameraX, LEVEL_COLS * TILE - GAME_W));
+}
+
+// ============================================================
+// DRAWING
+// ============================================================
+function drawBackground() {
+  // Gradient sky
+  bctx.fillStyle = COL.bg;
+  bctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Stars
+  for (const s of stars) {
+    const sx = ((s.x - cameraX * 0.2) % (GAME_W + 20)) - 10;
+    const twinkle = Math.sin(frameCount * 0.05 + s.twinkle);
+    if (twinkle > 0.3) {
+      bctx.globalAlpha = 0.3 + twinkle * 0.7;
+      drawRect(sx, s.y, s.size, s.size, COL.star);
+    }
+  }
+  bctx.globalAlpha = 1;
+
+  // Distant mountains (parallax)
+  const mOffset = -cameraX * 0.1;
+  bctx.fillStyle = COL.bgFar;
+  for (let i = 0; i < 8; i++) {
+    const mx = i * 80 + mOffset;
+    const mh = 20 + Math.sin(i * 1.5) * 15;
+    drawTriangle(mx, GAME_H - 40, mx + 40, GAME_H - 40 - mh, mx + 80, GAME_H - 40, COL.bgFar);
+  }
+
+  // Mid mountains
+  const m2Offset = -cameraX * 0.3;
+  for (let i = 0; i < 12; i++) {
+    const mx = i * 55 + m2Offset;
+    const mh = 12 + Math.sin(i * 2.1 + 1) * 8;
+    drawTriangle(mx, GAME_H - 32, mx + 25, GAME_H - 32 - mh, mx + 50, GAME_H - 32, COL.bgMid);
+  }
+}
+
+function drawTriangle(x1, y1, x2, y2, x3, y3, color) {
+  bctx.fillStyle = color;
+  bctx.beginPath();
+  bctx.moveTo(x1, y1);
+  bctx.lineTo(x2, y2);
+  bctx.lineTo(x3, y3);
+  bctx.closePath();
+  bctx.fill();
+}
+
+function drawLevel() {
+  const startCol = Math.max(0, Math.floor(cameraX / TILE) - 1);
+  const endCol = Math.min(LEVEL_COLS, startCol + Math.ceil(GAME_W / TILE) + 2);
+
+  for (let r = 0; r < LEVEL_ROWS; r++) {
+    for (let c = startCol; c < endCol; c++) {
+      const tile = levelMap[r][c];
+      const tx = c * TILE - cameraX;
+      const ty = r * TILE;
+
+      if (tile === 1) {
+        // Ground
+        drawRect(tx, ty, TILE, TILE, COL.ground);
+        // Top edge highlight
+        if (r === 0 || !isSolid(r - 1, c)) {
+          drawRect(tx, ty, TILE, 2, COL.groundTop);
+        }
+        // Small texture details
+        if ((r + c) % 3 === 0) {
+          drawPixel(tx + 4, ty + 6, COL.groundTop);
+          drawPixel(tx + 10, ty + 10, COL.groundTop);
+        }
+      } else if (tile === 2) {
+        // Platform
+        drawRect(tx, ty, TILE, 6, COL.platform);
+        drawRect(tx, ty, TILE, 2, COL.platformTop);
+        // Support pillars
+        drawRect(tx + 3, ty + 6, 2, 4, COL.platform);
+        drawRect(tx + TILE - 5, ty + 6, 2, 4, COL.platform);
+      }
+    }
+  }
+}
+
+function drawRocket(x, y, facing) {
+  // Rocket ship with Claude's colors
+  // Nose cone
+  drawRect(x + 4, y, 4, 2, COL.rocketNose);
+  drawRect(x + 3, y + 2, 6, 2, COL.rocketNose);
+  // Body
+  drawRect(x + 2, y + 4, 8, 6, COL.rocketBody);
+  // Eyes on the body
+  drawRect(x + 3, y + 5, 2, 2, COL.eyes);
+  drawRect(x + 7, y + 5, 2, 2, COL.eyes);
+  // Fins
+  drawRect(x, y + 8, 2, 4, COL.rocketFin);
+  drawRect(x + 10, y + 8, 2, 4, COL.rocketFin);
+  // Base
+  drawRect(x + 2, y + 10, 8, 2, COL.rocketFin);
+  // Flame
+  const flicker = frameCount % 4 < 2 ? 0 : 1;
+  drawRect(x + 4 + flicker, y + 12, 4, 2, COL.rocketFlame2);
+  drawRect(x + 5, y + 14, 2, 1 + flicker, COL.rocketFlame);
+}
+
+function drawPlayer() {
+  if (!player) return;
+  if (player.invincible > 0 && frameCount % 10 < 5) return; // Blink
+
+  const px = Math.floor(player.x - cameraX - 1);
+  const py = Math.floor(player.y + Math.round(player.squash));
+  const flip = player.facing < 0;
+
+  if (player.rocket > 0) {
+    drawRocket(px, py, player.facing);
+    return;
+  }
+
+  let sprite;
+  if (!player.onGround) {
+    sprite = CLAUDE_JUMP;
+  } else if (player.walkFrame === 1) {
+    sprite = CLAUDE_WALK;
+  } else {
+    sprite = CLAUDE_SPRITE;
+  }
+
+  drawSprite(sprite, px, py, flip);
+
+  // Crown
+  const crownY = py - 4;
+  const crownX = px + 1;
+  // Base band
+  drawRect(crownX + 1, crownY + 3, 10, 2, COL.token);
+  // Three points
+  drawRect(crownX + 1, crownY + 1, 2, 2, COL.token);
+  drawRect(crownX + 5, crownY, 2, 3, COL.token);
+  drawRect(crownX + 9, crownY + 1, 2, 2, COL.token);
+  // Gems
+  drawPixel(crownX + 2, crownY + 2, COL.heart);
+  drawPixel(crownX + 6, crownY + 1, COL.portal);
+  drawPixel(crownX + 10, crownY + 2, COL.heart);
+
+  // Draw boxing gloves if in punch mode
+  if (player.punch > 0) {
+    const gloveExtend = player.punching > 4 ? 8 : 2; // extended when punching
+    const gloveY = py + 6;
+    if (player.facing > 0) {
+      // Right-facing glove
+      const gx = px + 11 + gloveExtend;
+      drawRect(gx - 2, gloveY, 2, 3, COL.claudeDark); // arm
+      drawRect(gx, gloveY - 1, 4, 5, COL.glove);
+      drawRect(gx + 1, gloveY, 2, 3, COL.gloveHighlight);
+    } else {
+      // Left-facing glove
+      const gx = px - gloveExtend - 3;
+      drawRect(gx + 4, gloveY, 2, 3, COL.claudeDark); // arm
+      drawRect(gx, gloveY - 1, 4, 5, COL.glove);
+      drawRect(gx + 1, gloveY, 2, 3, COL.gloveHighlight);
+    }
+  }
+}
+
+function drawEnemies() {
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const ex = Math.floor(e.x - cameraX);
+    const ey = Math.floor(e.y);
+
+    if (ex < -20 || ex > GAME_W + 20) continue;
+
+    if (e.type === 'walker') {
+      // Bob up and down slightly
+      const bob = Math.sin(e.frame * 0.1) * 1;
+      drawEnemySprite(WALKER_SPRITE, ex - 1, ey + bob - 1);
+    } else if (e.type === 'spike') {
+      drawEnemySprite(SPIKE_SPRITE, ex - 2, ey - 2);
+    } else if (e.type === 'mummy') {
+      // Shuffling lurch
+      const lurch = Math.sin(e.frame * 0.06) * 1.5;
+      drawEnemySprite(MUMMY_SPRITE, ex - 1, ey + lurch - 1);
+    } else if (e.type === 'bigwalker') {
+      const bob = Math.sin(e.frame * 0.08) * 1;
+      const flashWhite = e.flashTimer > 0 && frameCount % 4 < 2;
+      if (flashWhite) {
+        // Flash white when hit
+        for (let row = 0; row < BIGWALKER_SPRITE.length; row++) {
+          const line = BIGWALKER_SPRITE[row];
+          for (let col = 0; col < line.length; col++) {
+            if (line[col] !== '.') drawPixel(Math.floor(ex - 3 + col), Math.floor(ey + bob - 1 + row), '#fff');
+          }
+        }
+      } else {
+        drawEnemySprite(BIGWALKER_SPRITE, ex - 3, ey + bob - 1);
+      }
+      // HP bar
+      const hpW = 16;
+      const hpX = ex + e.w / 2 - hpW / 2;
+      const hpY = ey - 6;
+      drawRect(hpX - 1, hpY - 1, hpW + 2, 4, '#000');
+      drawRect(hpX, hpY, Math.ceil(hpW * (e.hp / e.maxHp)), 2, COL.enemy1);
+    }
+  }
+}
+
+function drawTokens() {
+  for (const t of tokens) {
+    if (t.collected) continue;
+    const tx = Math.floor(t.x - cameraX);
+    const ty = Math.floor(t.y);
+
+    if (tx < -10 || tx > GAME_W + 10) continue;
+
+    // Spinning coin effect
+    const phase = Math.sin(frameCount * 0.08 + t.x * 0.1);
+    const w = Math.max(2, Math.floor(Math.abs(phase) * 6));
+    const ox = Math.floor((6 - w) / 2);
+
+    // Draw rounded coin (8px tall, variable width for spin)
+    // Glow
+    bctx.globalAlpha = 0.3;
+    drawRect(tx + ox, ty, w, 8, COL.tokenGlow);
+    bctx.globalAlpha = 1;
+
+    // Rounded shape: inset top and bottom rows
+    const inset = Math.max(1, Math.floor(w / 4));
+    drawRect(tx + ox + inset, ty, w - inset * 2, 1, COL.token);       // top row narrow
+    drawRect(tx + ox, ty + 1, w, 6, COL.token);                        // middle rows full
+    drawRect(tx + ox + inset, ty + 7, w - inset * 2, 1, COL.token);   // bottom row narrow
+    // Shine
+    if (phase > 0.5 && w > 3) {
+      drawRect(tx + ox + inset, ty + 2, 1, 2, '#fff');
+    }
+  }
+}
+
+function drawPortal() {
+  if (!portal) return;
+  const px = Math.floor(portal.x - cameraX);
+  const py = Math.floor(portal.y);
+
+  if (px < -20 || px > GAME_W + 20) return;
+
+  // Animated portal
+  const pulse = Math.sin(frameCount * 0.06) * 2;
+
+  // Glow
+  bctx.globalAlpha = 0.2 + Math.sin(frameCount * 0.04) * 0.1;
+  drawRect(px - 4, py - 4, 24, 40, COL.portalGlow);
+  bctx.globalAlpha = 1;
+
+  // Portal frame
+  drawRect(px, py, 16, 32, COL.portal);
+  drawRect(px + 2, py + 2, 12, 28, COL.bg);
+
+  // Inner swirl
+  const swirl = frameCount * 0.1;
+  for (let i = 0; i < 5; i++) {
+    const sy = py + 4 + ((i * 6 + frameCount * 0.5) % 26);
+    const sx = px + 4 + Math.sin(swirl + i) * 3;
+    bctx.globalAlpha = 0.5;
+    drawRect(sx, sy, 4 + pulse, 2, COL.portalGlow);
+  }
+  bctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+  // Lives (hearts)
+  const maxHearts = 2 + currentLevel; // 3, 4, 5
+  for (let i = 0; i < maxHearts; i++) {
+    const hx = 4 + i * 12;
+    const hy = 4;
+    if (i < lives) {
+      // Filled heart
+      drawRect(hx + 1, hy, 3, 1, COL.heart);
+      drawRect(hx + 5, hy, 3, 1, COL.heart);
+      drawRect(hx, hy + 1, 9, 1, COL.heart);
+      drawRect(hx, hy + 2, 9, 1, COL.heart);
+      drawRect(hx + 1, hy + 3, 7, 1, COL.heart);
+      drawRect(hx + 2, hy + 4, 5, 1, COL.heart);
+      drawRect(hx + 3, hy + 5, 3, 1, COL.heart);
+    } else {
+      // Empty heart
+      drawRect(hx + 1, hy, 3, 1, '#444');
+      drawRect(hx + 5, hy, 3, 1, '#444');
+      drawRect(hx, hy + 1, 1, 2, '#444');
+      drawRect(hx + 8, hy + 1, 1, 2, '#444');
+      drawRect(hx + 4, hy, 1, 2, '#444');
+      drawRect(hx + 1, hy + 3, 1, 1, '#444');
+      drawRect(hx + 7, hy + 3, 1, 1, '#444');
+      drawRect(hx + 2, hy + 4, 1, 1, '#444');
+      drawRect(hx + 6, hy + 4, 1, 1, '#444');
+      drawRect(hx + 3, hy + 5, 3, 1, '#444');
+    }
+  }
+
+  // Level indicator
+  bctx.font = '6px monospace';
+  bctx.fillStyle = '#8866aa';
+  bctx.fillText('LVL ' + currentLevel, 4, 18);
+
+  // Score
+  bctx.font = '8px monospace';
+  bctx.fillStyle = COL.textShadow;
+  bctx.fillText('SCORE: ' + score, GAME_W - 79, 11);
+  bctx.fillStyle = COL.text;
+  bctx.fillText('SCORE: ' + score, GAME_W - 80, 10);
+
+  // Rocket timer
+  if (player && player.rocket > 0) {
+    const secs = Math.ceil(player.rocket / 60);
+    const barW = 40;
+    const barH = 4;
+    const barX = (GAME_W - barW) / 2;
+    const barY = 4;
+    const fill = player.rocket / ROCKET_DURATION;
+
+    // Background
+    drawRect(barX - 1, barY - 1, barW + 2, barH + 2, '#000');
+    // Fill
+    const barColor = secs <= 5 ? COL.rocketFlame : COL.rocketFlame2;
+    drawRect(barX, barY, Math.ceil(barW * fill), barH, barColor);
+
+    // Label
+    bctx.textAlign = 'center';
+    bctx.fillStyle = COL.text;
+    bctx.fillText('ROCKET ' + secs + 's', GAME_W / 2, barY + barH + 8);
+    bctx.textAlign = 'left';
+  }
+
+  // Punch timer
+  if (player && player.punch > 0) {
+    const secs = Math.ceil(player.punch / 60);
+    const barW = 40;
+    const barH = 4;
+    const barX = (GAME_W - barW) / 2;
+    const barY = 4;
+    const fill = player.punch / PUNCH_DURATION;
+
+    drawRect(barX - 1, barY - 1, barW + 2, barH + 2, '#000');
+    const barColor = secs <= 5 ? COL.punchSprinkle : COL.glove;
+    drawRect(barX, barY, Math.ceil(barW * fill), barH, barColor);
+
+    bctx.textAlign = 'center';
+    bctx.fillStyle = COL.text;
+    bctx.fillText('PUNCH ' + secs + 's  [X]', GAME_W / 2, barY + barH + 8);
+    bctx.textAlign = 'left';
+  }
+
+  // Wizard boss HP bar (big, at top center)
+  if (wizard && wizard.state !== 'dead' && wizard.state !== 'hidden') {
+    const hpW = 80;
+    const hpH = 6;
+    const hpX = (GAME_W - hpW) / 2;
+    const hpY = GAME_H - 14;
+    drawRect(hpX - 1, hpY - 1, hpW + 2, hpH + 2, '#000');
+    drawRect(hpX, hpY, Math.ceil(hpW * (wizard.hp / wizard.maxHp)), hpH, COL.wizard);
+    bctx.textAlign = 'center';
+    bctx.font = '6px monospace';
+    bctx.fillStyle = COL.text;
+    bctx.fillText('THE WIZARD', GAME_W / 2, hpY - 3);
+    bctx.textAlign = 'left';
+  }
+}
+
+// ============================================================
+// SCREENS
+// ============================================================
+function drawTitleScreen() {
+  bctx.fillStyle = COL.bg;
+  bctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Stars on title
+  for (const s of stars) {
+    const twinkle = Math.sin(frameCount * 0.05 + s.twinkle);
+    if (twinkle > 0.3 && s.x < GAME_W) {
+      bctx.globalAlpha = 0.3 + twinkle * 0.7;
+      drawRect(s.x % GAME_W, s.y, s.size, s.size, COL.star);
+    }
+  }
+  bctx.globalAlpha = 1;
+
+  // Title character
+  const bobY = Math.sin(frameCount * 0.04) * 3;
+  const titleX = GAME_W / 2 - 6;
+  const titleY = 50 + bobY;
+  drawSprite(CLAUDE_SPRITE, titleX, titleY, false);
+  // Crown on title character
+  const tcx = titleX + 1;
+  const tcy = titleY - 4;
+  drawRect(tcx + 1, tcy + 3, 10, 2, COL.token);
+  drawRect(tcx + 1, tcy + 1, 2, 2, COL.token);
+  drawRect(tcx + 5, tcy, 2, 3, COL.token);
+  drawRect(tcx + 9, tcy + 1, 2, 2, COL.token);
+  drawPixel(tcx + 2, tcy + 2, COL.heart);
+  drawPixel(tcx + 6, tcy + 1, COL.portal);
+  drawPixel(tcx + 10, tcy + 2, COL.heart);
+
+  // Title text
+  bctx.textAlign = 'center';
+  bctx.font = 'bold 16px monospace';
+  bctx.fillStyle = COL.textShadow;
+  bctx.fillText("CLAUDE'S ADVENTURE", GAME_W / 2 + 1, 101);
+  bctx.fillStyle = COL.claude;
+  bctx.fillText("CLAUDE'S ADVENTURE", GAME_W / 2, 100);
+
+  // Subtitle
+  bctx.font = '8px monospace';
+  const blink = Math.sin(frameCount * 0.06) > 0;
+  if (blink) {
+    bctx.fillStyle = COL.text;
+    bctx.fillText('PRESS SPACE TO START', GAME_W / 2, 130);
+  }
+
+  // Level select
+  bctx.font = '7px monospace';
+  bctx.fillStyle = COL.text;
+  const levelText = 'LEVEL SELECT: 1 2 3 4 5 6 7 8';
+  bctx.fillText(levelText, GAME_W / 2, 148);
+  // Highlight current selection
+  const charW = bctx.measureText('A').width;
+  const textW = bctx.measureText(levelText).width;
+  const textLeft = GAME_W / 2 - textW / 2;
+  // Digits are at character indices 14, 16, 18, 20, 22, 24, 26, 28
+  const digitIndex = 14 + (currentLevel - 1) * 2;
+  const digitX = textLeft + digitIndex * charW + charW / 2;
+  drawRect(digitX - 4, 141, 9, 10, 'rgba(255,255,255,0.15)');
+
+  // Controls
+  bctx.fillStyle = '#8866aa';
+  bctx.font = '6px monospace';
+  bctx.fillText('ARROWS/WASD: MOVE   SPACE: JUMP   X: PUNCH', GAME_W / 2, 168);
+  bctx.fillText('STOMP ENEMIES FROM ABOVE!', GAME_W / 2, 178);
+
+  bctx.textAlign = 'left';
+}
+
+function drawGameOverScreen() {
+  bctx.fillStyle = 'rgba(0,0,0,0.6)';
+  bctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  bctx.textAlign = 'center';
+  bctx.font = 'bold 16px monospace';
+  bctx.fillStyle = COL.enemy1;
+  bctx.fillText('GAME OVER', GAME_W / 2, 80);
+
+  bctx.font = '8px monospace';
+  bctx.fillStyle = COL.text;
+  bctx.fillText('SCORE: ' + score, GAME_W / 2, 110);
+
+  if (deathTimer <= 0) {
+    const blink = Math.sin(frameCount * 0.06) > 0;
+    if (blink) {
+      bctx.fillText('PRESS SPACE TO RETRY', GAME_W / 2, 140);
+    }
+  }
+  bctx.textAlign = 'left';
+}
+
+function drawLevelCompleteScreen() {
+  bctx.fillStyle = 'rgba(0,0,0,0.5)';
+  bctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  bctx.textAlign = 'center';
+  bctx.font = 'bold 14px monospace';
+  bctx.fillStyle = COL.token;
+  bctx.fillText('LEVEL ' + currentLevel + ' COMPLETE!', GAME_W / 2, 65);
+
+  bctx.font = '8px monospace';
+  bctx.fillStyle = COL.text;
+  bctx.fillText('SCORE: ' + score, GAME_W / 2, 90);
+
+  bctx.fillStyle = COL.portalGlow;
+  bctx.fillText('BONUS LIFE AWARDED!', GAME_W / 2, 110);
+
+  // Draw a little heart
+  const hx = GAME_W / 2 - 4;
+  const hy = 116;
+  drawRect(hx + 1, hy, 3, 1, COL.heart);
+  drawRect(hx + 5, hy, 3, 1, COL.heart);
+  drawRect(hx, hy + 1, 9, 1, COL.heart);
+  drawRect(hx, hy + 2, 9, 1, COL.heart);
+  drawRect(hx + 1, hy + 3, 7, 1, COL.heart);
+  drawRect(hx + 2, hy + 4, 5, 1, COL.heart);
+  drawRect(hx + 3, hy + 5, 3, 1, COL.heart);
+
+  winTimer++;
+  if (winTimer > 60) {
+    const blink = Math.sin(frameCount * 0.06) > 0;
+    if (blink) {
+      bctx.fillStyle = COL.text;
+      bctx.fillText('PRESS SPACE FOR LEVEL ' + (currentLevel + 1), GAME_W / 2, 150);
+    }
+  }
+  bctx.textAlign = 'left';
+}
+
+function drawWinScreen() {
+  bctx.fillStyle = 'rgba(0,0,0,0.5)';
+  bctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  bctx.textAlign = 'center';
+  bctx.font = 'bold 16px monospace';
+  bctx.fillStyle = COL.token;
+  bctx.fillText('YOU WIN!', GAME_W / 2, 50);
+
+  bctx.font = '8px monospace';
+  bctx.fillStyle = COL.wizardShield;
+  bctx.fillText('THE WIZARD HAS BEEN DEFEATED!', GAME_W / 2, 70);
+
+  bctx.fillStyle = COL.text;
+  bctx.fillText('SCORE: ' + score, GAME_W / 2, 90);
+
+  bctx.fillStyle = COL.heart;
+  bctx.fillText('LIVES BONUS: ' + (lives * 200), GAME_W / 2, 105);
+
+  bctx.fillStyle = COL.token;
+  bctx.font = 'bold 10px monospace';
+  bctx.fillText('TOTAL: ' + (score + lives * 200), GAME_W / 2, 125);
+
+  winTimer++;
+  if (winTimer > 60) {
+    const blink = Math.sin(frameCount * 0.06) > 0;
+    if (blink) {
+      bctx.font = '8px monospace';
+      bctx.fillStyle = COL.text;
+      bctx.fillText('PRESS SPACE TO PLAY AGAIN', GAME_W / 2, 155);
+    }
+  }
+  bctx.textAlign = 'left';
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function update() {
+  frameCount++;
+  pollGamepad();
+
+  if (gameState === 'title') {
+    startTitleMusic();
+    // Level select with number keys
+    if (keys['Digit1']) currentLevel = 1;
+    if (keys['Digit2']) currentLevel = 2;
+    if (keys['Digit3']) currentLevel = 3;
+    if (keys['Digit4']) currentLevel = 4;
+    if (keys['Digit5']) currentLevel = 5;
+    if (keys['Digit6']) currentLevel = 6;
+    if (keys['Digit7']) currentLevel = 7;
+    if (keys['Digit8']) currentLevel = 8;
+    if (isJump()) {
+      gameState = 'playing';
+      score = 0;
+      lives = 2 + currentLevel; // 3-7 depending on level
+      initLevel();
+      startGameMusic();
+    }
+  } else if (gameState === 'playing') {
+    updatePlayer();
+    updateEnemies();
+    updateTokens();
+    updateSprinkleClouds();
+    updatePunchClouds();
+    // Trigger wizard boss when player enters arena in level 3
+    if (currentLevel === 3 && !wizard && player.x > 30 * TILE) {
+      wizard = createWizard();
+      spawnFloatingText(player.x, player.y - 20, 'THE WIZARD!', COL.wizard);
+    }
+    // Trigger zombie boss when player enters arena in level 5
+    if (currentLevel === 5 && !zombie && player.x > 18 * TILE) {
+      zombie = createZombie();
+      spawnFloatingText(player.x, player.y - 20, 'THE ZOMBIE!', COL.zombie);
+      SFX.zombieRoar();
+    }
+    updateWizard();
+    updateZombie();
+    updateCamera();
+    updateParticles();
+    if (shakeTimer > 0) shakeTimer--;
+  } else if (gameState === 'gameover') {
+    if (deathTimer > 0) {
+      deathTimer--;
+    } else if (isJump()) {
+      gameState = 'playing';
+      score = 0;
+      lives = 3;
+      currentLevel = 1;
+      initLevel();
+      startGameMusic();
+    }
+  } else if (gameState === 'levelcomplete') {
+    updateParticles();
+    if (winTimer > 60 && isJump()) {
+      currentLevel++;
+      lives++; // bonus life!
+      initLevel();
+      gameState = 'playing';
+      startGameMusic();
+    }
+  } else if (gameState === 'win') {
+    updateParticles();
+    if (winTimer > 60 && isJump()) {
+      gameState = 'playing';
+      score = 0;
+      lives = 3;
+      currentLevel = 1;
+      initLevel();
+      startGameMusic();
+    }
+  }
+}
+
+function draw() {
+  bctx.save();
+
+  if (gameState === 'title') {
+    drawTitleScreen();
+  } else {
+    drawBackground();
+    drawLevel();
+    drawSprinkleClouds();
+    drawPunchClouds();
+    drawWizard();
+    drawWizardBolts();
+    drawZombie();
+    drawPortal();
+    drawTokens();
+    drawEnemies();
+    drawPlayer();
+    drawParticles();
+    drawHUD();
+
+    if (gameState === 'gameover') drawGameOverScreen();
+    if (gameState === 'levelcomplete') drawLevelCompleteScreen();
+    if (gameState === 'win') drawWinScreen();
+  }
+
+  bctx.restore();
+
+  // Scale buffer to main canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(buf, 0, 0, canvas.width, canvas.height);
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// Start
+gameLoop();
+</script>
+</body>
+</html>
