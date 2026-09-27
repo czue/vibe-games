@@ -189,9 +189,9 @@ const level1: LevelDef = {
 
   build(game) {
     l1Lanes = [
-      { z: 9, dir: 1, speed: 5, every: [2.2, 3.8], logR: 0.45, length: 3, timer: 0.5 },
-      { z: 1, dir: -1, speed: 6, every: [2, 3.4], logR: 0.45, length: 3, timer: 1.5 },
-      { z: -7, dir: 1, speed: 6.5, every: [1.8, 3.2], logR: 0.5, length: 3.2, timer: 1 },
+      { z: 9, dir: 1, speed: 4.5, every: [3.2, 5], logR: 0.45, length: 3, timer: 0.5 },
+      { z: 1, dir: -1, speed: 5, every: [3, 4.8], logR: 0.45, length: 3, timer: 1.5 },
+      { z: -7, dir: 1, speed: 5.5, every: [2.8, 4.5], logR: 0.5, length: 3.2, timer: 1 },
     ];
     l1ConeTimer = 6;
     l1FoodTimer = 0;
@@ -286,9 +286,8 @@ const level1: LevelDef = {
       [-4, -10],
       [10, -16],
       [-12, 4],
-      [10, -1],
     ]) {
-      game.add(new Squash(x, z, 1.4, 10));
+      game.add(new Squash(x, z, 1.4, 8));
     }
 
     // Food
@@ -355,9 +354,9 @@ const level2: LevelDef = {
   build(game) {
     // Logs here are longer than Bob will ever be big, so they stay dangerous the whole level.
     l2Lanes = [
-      { z: 11, dir: 1, speed: 6, every: [2, 3.5], logR: 0.6, length: 3.4, timer: 0.5 },
-      { z: 3, dir: -1, speed: 7, every: [1.8, 3.2], logR: 0.6, length: 3.4, timer: 1.5 },
-      { z: -5, dir: 1, speed: 7.5, every: [1.6, 3], logR: 0.65, length: 3.6, timer: 1 },
+      { z: 11, dir: 1, speed: 5, every: [3.2, 5], logR: 0.6, length: 3.4, timer: 0.5 },
+      { z: 3, dir: -1, speed: 6, every: [3, 4.8], logR: 0.6, length: 3.4, timer: 1.5 },
+      { z: -5, dir: 1, speed: 6.5, every: [2.8, 4.5], logR: 0.65, length: 3.6, timer: 1 },
     ];
     l2ConeTimer = 5;
     l2FoodTimer = 0;
@@ -428,10 +427,9 @@ const level2: LevelDef = {
     for (let i = 0; i < 5; i++) game.add(new Squash(...freeSpot(game, 0.8), 0.5, 8));
     for (const [x, z] of [
       [-8, 7],
-      [9, -1],
       [-3, -10],
     ]) {
-      game.add(new Squash(x, z, 1.2, 11));
+      game.add(new Squash(x, z, 1.2, 8));
     }
     game.add(new Bigfoot(6, -12, 1));
 

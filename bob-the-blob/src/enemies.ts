@@ -100,7 +100,7 @@ export class Squash extends Thing {
     if (this.hopT >= 1) {
       this.pos.y = 0;
       this.state = 'idle';
-      this.timer = rand(0.45, 0.9);
+      this.timer = rand(0.7, 1.3);
       this.squish = 1;
       game.pushOut(this);
       game.onSquashLand(this);
@@ -112,7 +112,7 @@ export class Squash extends Thing {
     this.from.copy(this.pos);
     if (flatDist(bob.pos, this.pos) < this.aggro && bob.squashTimer <= 0) {
       // Aim where Bob is heading, not where he is.
-      const lead = (0.5 + this.size * 0.2) * 0.7;
+      const lead = (0.5 + this.size * 0.2) * 0.35;
       this.to.set(bob.pos.x + bob.vel.x * lead, 0, bob.pos.z + bob.vel.z * lead);
       const maxHop = this.size * 3 + 2;
       const dx = this.to.x - this.from.x;
