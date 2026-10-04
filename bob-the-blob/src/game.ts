@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Bob } from './bob';
-import { Thing, rand, pick } from './things';
+import { Thing, Ramp, rand, pick } from './things';
 import type { Squash, FallingCone, Bigfoot } from './enemies';
 import { UI } from './ui';
 import { Input } from './input';
@@ -40,6 +40,7 @@ export class Game {
   private swallowRepeat = 0;
   private growTimer = 0;
   private goalAnnounced = false;
+  private rampUnderBob: Ramp | null = null;
   private clock = 0;
   private camLook = new THREE.Vector3();
   private sun: THREE.DirectionalLight;
@@ -223,13 +224,15 @@ export class Game {
     b.pos.z = THREE.MathUtils.clamp(b.pos.z, -lim, lim);
 
     let ground = 0;
+    // How tall a ledge Bob can walk up without jumping (more when stepping off a ramp onto its stump).
+    const stepUp = this.rampUnderBob ? 1.2 : 0.35;
     for (const t of this.things) {
       if (!t.solid || t.dead || t.beingEaten || t.thrown) continue;
       const dx = b.pos.x - t.pos.x;
       const dz = b.pos.z - t.pos.z;
       const dist = Math.hypot(dx, dz);
       // Close enough to the top to stand on it (this also lets Bob hop up small steps).
-      if (b.pos.y >= t.top - 0.35) {
+      if (b.pos.y >= t.top - stepUp) {
         if (dist < t.radius * 0.9 + r * 0.3) ground = Math.max(ground, t.top);
         continue;
       }
@@ -253,6 +256,19 @@ export class Game {
       }
     }
 
+    if (this.rampUnderBob && b.grounded) this.rampUnderBob.keepOn(b.pos, r);
+    this.rampUnderBob = null;
+    for (const t of this.things) {
+      if (!(t instanceof Ramp)) continue;
+      const h = t.heightAt(b.pos.x, b.pos.z);
+      if (h === null) continue;
+      // On (or just above) the planks: stand on them. Below them: you walked into the side.
+      if (b.pos.y >= h - 0.6) {
+        if (h >= ground) this.rampUnderBob = t;
+        ground = Math.max(ground, h);
+      } else t.pushOffSide(b.pos, r * 0.9);
+    }
+
     if (b.pos.y <= ground) {
       if (!b.grounded && b.vel.y < -8) b.landSquish = 1;
       b.pos.y = ground;
@@ -266,6 +282,10 @@ export class Game {
   /** Keep a walking/hopping thing out of walls, rocks and trees. */
   pushOut(t: Thing): void {
     for (const o of this.things) {
+      if (o instanceof Ramp) {
+        if (o.heightAt(t.pos.x, t.pos.z, t.radius) !== null) o.pushOffSide(t.pos, t.radius);
+        continue;
+      }
       if (o === t || !o.solid || o.dead || o.beingEaten || o.thrown) continue;
       if (o.kind === 'squash' || o.kind === 'bigfoot') continue;
       const dx = t.pos.x - o.pos.x;

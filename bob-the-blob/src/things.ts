@@ -1,7 +1,18 @@
 import * as THREE from 'three';
 import type { Game } from './game';
 
-export type Kind = 'food' | 'rock' | 'wall' | 'squash' | 'log' | 'pinecone' | 'thorn' | 'flower' | 'bigfoot' | 'bug';
+export type Kind =
+  | 'food'
+  | 'rock'
+  | 'wall'
+  | 'ramp'
+  | 'squash'
+  | 'log'
+  | 'pinecone'
+  | 'thorn'
+  | 'flower'
+  | 'bigfoot'
+  | 'bug';
 
 /**
  * Everything in the world that isn't Bob. Positions are "feet" positions:
@@ -338,4 +349,91 @@ export function makeStump(x: number, z: number, r: number, h: number, holeSide: 
   ring.position.y = h + 0.01;
   t.group.add(ring);
   return t;
+}
+
+// ---------- Ramp: a wooden plank you can walk up (easy mode's way to the goal) ----------
+
+export class Ramp extends Thing {
+  private dirX: number;
+  private dirZ: number;
+  private length: number;
+
+  /** A straight ramp from `bottom` (ground level) up to `top`, rising `rise` units. */
+  constructor(bottom: [number, number], top: [number, number], public rise: number, public width: number) {
+    super('ramp');
+    this.pos.set(bottom[0], 0, bottom[1]);
+    const dx = top[0] - bottom[0];
+    const dz = top[1] - bottom[1];
+    this.length = Math.hypot(dx, dz);
+    this.dirX = dx / this.length;
+    this.dirZ = dz / this.length;
+    this.radius = this.visualRadius = width / 2;
+    this.height = rise;
+
+    const wood = mat(0xb5834f);
+    const darkWood = mat(0x7a5230);
+    const slope = Math.atan2(rise, this.length);
+    const slabLen = Math.hypot(rise, this.length);
+    this.group.rotation.y = Math.atan2(dx, dz);
+    const pivot = new THREE.Group();
+    pivot.rotation.x = -slope;
+    const slab = mesh(new THREE.BoxGeometry(width, 0.3, slabLen), wood);
+    slab.position.set(0, -0.15, slabLen / 2);
+    pivot.add(slab);
+    // Slats so it reads as planks
+    for (let d = 0.6; d < slabLen; d += 0.9) {
+      const slat = mesh(new THREE.BoxGeometry(width * 1.02, 0.06, 0.12), darkWood);
+      slat.position.set(0, 0.02, d);
+      pivot.add(slat);
+    }
+    // Side rails
+    for (const side of [-1, 1]) {
+      const rail = mesh(new THREE.BoxGeometry(0.15, 0.4, slabLen), darkWood);
+      rail.position.set((side * width) / 2, 0.15, slabLen / 2);
+      pivot.add(rail);
+    }
+    this.group.add(pivot);
+    // Posts holding it up
+    for (const k of [0.4, 0.7, 0.95]) {
+      const h = rise * k;
+      for (const side of [-1, 1]) {
+        const post = mesh(new THREE.CylinderGeometry(0.12, 0.15, h, 6), darkWood);
+        post.position.set(side * width * 0.4, h / 2, this.length * k);
+        this.group.add(post);
+      }
+    }
+  }
+
+  private local(x: number, z: number): { along: number; across: number } {
+    const rx = x - this.pos.x;
+    const rz = z - this.pos.z;
+    return { along: rx * this.dirX + rz * this.dirZ, across: rx * this.dirZ - rz * this.dirX };
+  }
+
+  /** Height of the ramp surface at (x, z), or null if that spot isn't over the ramp. */
+  heightAt(x: number, z: number, margin = 0): number | null {
+    const { along, across } = this.local(x, z);
+    if (along < -margin || along > this.length + margin || Math.abs(across) > this.width / 2 + margin) return null;
+    return (this.rise * THREE.MathUtils.clamp(along, 0, this.length)) / this.length;
+  }
+
+  /** The side rails: keep a walking Bob between them (jumping gets you over). */
+  keepOn(p: THREE.Vector3, r: number): void {
+    const { along, across } = this.local(p.x, p.z);
+    if (along < 0.5 || along > this.length) return;
+    const limit = Math.max(0, this.width / 2 - r * 0.5);
+    if (Math.abs(across) <= limit) return;
+    const shift = Math.sign(across) * limit - across;
+    p.x += shift * this.dirZ;
+    p.z -= shift * this.dirX;
+  }
+
+  /** Shove a position sideways off the ramp (used for monsters, and Bob walking into its side). */
+  pushOffSide(p: THREE.Vector3, r: number): void {
+    const { across } = this.local(p.x, p.z);
+    const target = (Math.sign(across) || 1) * (this.width / 2 + r);
+    const shift = target - across;
+    p.x += shift * this.dirZ;
+    p.z -= shift * this.dirX;
+  }
 }

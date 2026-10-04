@@ -6,6 +6,7 @@ export interface Difficulty {
   label: string;
   hearts: number;
   growthMul: number; // how much Bob grows per bite
+  goalRamp: boolean; // true = walk up a ramp to the goal, false = jump up stair-stumps
   squashDrop: number; // bites Bob loses when flattened
   squashCountMul: number; // fraction of each level's big squashes that show up
   squashRest: [number, number]; // seconds between hops
@@ -26,7 +27,8 @@ export const DIFFICULTIES: Record<DifficultyName, Difficulty> = {
     name: 'easy',
     label: '🌱 Easy',
     hearts: 5,
-    growthMul: 1.3,
+    growthMul: 0.85,
+    goalRamp: true,
     squashDrop: 2,
     squashCountMul: 0.67,
     squashRest: [1.3, 2.2],
@@ -45,7 +47,8 @@ export const DIFFICULTIES: Record<DifficultyName, Difficulty> = {
     name: 'regular',
     label: '🔥 Regular',
     hearts: 3,
-    growthMul: 1,
+    growthMul: 0.65,
+    goalRamp: false,
     squashDrop: 4,
     squashCountMul: 1,
     squashRest: [0.7, 1.3],

@@ -25,8 +25,10 @@ Then open the URL shown in the terminal (usually http://localhost:5173). Add `?l
 
 Pick a mode on the title screen (click it, or use the arrow keys and Enter). The game remembers your choice.
 
-- **🌱 Easy** — 5 hearts, one log lane, fewer and sleepier squashes, fewer pinecones, a calmer Bigfoot, and Bob grows faster.
-- **🔥 Regular** — 3 hearts, three log lanes, and squashes that aim where you're going.
+- **🌱 Easy** — 5 hearts, one log lane, fewer and sleepier squashes, fewer pinecones, a calmer Bigfoot, and a ramp
+  up to the goal treat instead of jumping.
+- **🔥 Regular** — 3 hearts, three log lanes, squashes that aim where you're going, and you have to jump up
+  stair-stumps to reach the goal.
 
 All the difficulty numbers live in `src/difficulty.ts` if you want to tweak them.
 
@@ -34,7 +36,7 @@ All the difficulty numbers live in `src/difficulty.ts` if you want to tweak them
 
 - You can only swallow things **smaller than you**. The more you eat, the bigger you get.
 - Fill the size meter until Bob is **big enough**, then find the level's goal treat (follow the beam of light).
-  It sits on top of a tall stump past the log lanes — jump up the stair-stumps to reach it, then swallow it
+  It sits on top of a tall stump past the log lanes — walk up the ramp (easy) or jump up the stair-stumps (regular), then swallow it
   to grow into the next level, where the world is a whole new scale.
 - **Squashes, rolling logs, and Bigfoot** squash you flat like a pancake, and you lose some of what you ate.
 - **Pinecones and thorny vines** hurt (you lose a heart). Watch for the shadow of falling pinecones!
@@ -44,6 +46,6 @@ All the difficulty numbers live in `src/difficulty.ts` if you want to tweak them
 ## Levels
 
 1. **The Forest Floor** — Bob is ant-sized and everything is huge. Goal: the Giant Strawberry 🍓.
-2. **The Big Woods** — Bob is bunny-sized, the little squashes are snacks (the medium ones aren't!), and Bigfoot is on the loose. Goal: the Golden Pinecone ✨.
+2. **The Big Woods** — Bob starts coconut-sized and grows to the size of a person, the little squashes are snacks (the medium ones aren't!), and Bigfoot is on the loose. Goal: the Golden Pinecone ✨.
 
-Coming someday: planets. 🪐
+Coming someday (many, many levels from now): planets. 🪐

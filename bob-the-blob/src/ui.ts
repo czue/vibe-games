@@ -118,9 +118,9 @@ export class UI {
 
   showFinale(): void {
     this.overlay.innerHTML = `
-      <h1>BOB IS ENORMOUS!</h1>
-      <p class="tag">He ate so much of the forest that he's as big as a house.</p>
-      <p>Next stop... 🪐 <b>PLANETS</b> 🪐<br><small>(coming soon!)</small></p>
+      <h1>BOB IS PERSON-SIZED!</h1>
+      <p class="tag">He ate so much of the forest that he's as big as a grown-up.</p>
+      <p>But he's still hungry... One day he'll eat 🪐 <b>PLANETS</b> 🪐<br><small>(that's a LOT of levels away!)</small></p>
       <p class="press">Press Enter to play again</p>`;
     this.overlay.classList.add('show');
   }

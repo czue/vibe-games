@@ -18,6 +18,7 @@ import {
   makeSeed,
   makeStump,
   makeTrunk,
+  Ramp,
 } from './things';
 import { Bigfoot, FallingCone, FlowerVine, GoalTreat, Ladybug, RollingLog, Squash, ThornVine } from './enemies';
 
@@ -48,7 +49,11 @@ function freeSpot(game: Game, r: number): [number, number] {
     const x = rand(-lim, lim);
     const z = rand(-lim, lim);
     if (game.level.laneZs.some((lz) => Math.abs(lz - z) < 2 + r)) continue;
-    const blocked = game.things.some((t) => t.solid && Math.hypot(t.pos.x - x, t.pos.z - z) < t.radius + r + 0.4);
+    const blocked = game.things.some(
+      (t) =>
+        (t.solid && Math.hypot(t.pos.x - x, t.pos.z - z) < t.radius + r + 0.4) ||
+        (t instanceof Ramp && t.heightAt(x, z, r + 0.4) !== null),
+    );
     if (!blocked) return [x, z];
   }
   return [rand(-lim, lim), rand(-lim, lim)];
@@ -154,17 +159,28 @@ function dropCone(game: Game, size: number, spread: number): void {
 }
 
 /**
- * The goal treat sits on a tall stump. You can only get up there by jumping
- * step -> step -> top, and the steps are too tall to reach until Bob has grown.
+ * The goal treat sits on a tall stump. On regular you get up there by jumping
+ * step -> step -> top (the steps are too tall to reach until Bob has grown).
+ * On easy there's a ramp instead, which starts at `rampBottom` and runs straight to the stump.
  */
 function buildGoalTower(
   game: Game,
   top: [number, number, number, number], // x, z, radius, height
   steps: [number, number, number, number][],
+  rampBottom: [number, number],
   goal: (y: number) => GoalTreat,
 ): void {
-  for (const [x, z, r, h] of steps) game.add(makeStump(x, z, r, h, 0));
   const [x, z, r, h] = top;
+  if (difficulty.goalRamp) {
+    // Run the ramp's top end a little way onto the stump so there's no gap.
+    const dx = rampBottom[0] - x;
+    const dz = rampBottom[1] - z;
+    const d = Math.hypot(dx, dz);
+    const inset = r - 0.3;
+    game.add(new Ramp(rampBottom, [x + (dx / d) * inset, z + (dz / d) * inset], h, 2.6));
+  } else {
+    for (const [sx, sz, sr, sh] of steps) game.add(makeStump(sx, sz, sr, sh, 0));
+  }
   const tower = game.add(makeStump(x, z, r, h, 0));
   tower.fadeable = false;
   game.add(goal(tower.top));
@@ -223,6 +239,7 @@ const level1: LevelDef = {
         [-6.5, -12, 1.4, 2.2],
         [-3.9, -14.6, 1.2, 3.9],
       ],
+      [-11, -11],
       (y) => new GoalTreat(0, -16, y, this.targetRadius * 0.85 - 0.02, 'strawberry'),
     );
 
@@ -306,7 +323,10 @@ const level1: LevelDef = {
     for (let i = 0; i < 8; i++) {
       const a = rand(0, Math.PI * 2);
       const d = rand(4.5, 6.5);
-      game.add(makeAcorn(-14 + Math.cos(a) * d, Math.max(-B + 1, -17 + Math.sin(a) * d), rand(0.42, 0.5)));
+      const x = -14 + Math.cos(a) * d;
+      const z = Math.max(-B + 1, -17 + Math.sin(a) * d);
+      if (game.things.some((t) => t instanceof Ramp && t.heightAt(x, z, 0.6) !== null)) continue;
+      game.add(makeAcorn(x, z, rand(0.42, 0.5)));
     }
     for (let i = 0; i < 6; i++) game.add(makeMushroom(...freeSpot(game, 0.7), rand(0.5, 0.65), pick(CAP_COLORS)));
     for (let i = 0; i < 6; i++) game.add(new Ladybug(...freeSpot(game, 0.3), 0.25));
@@ -352,7 +372,7 @@ const level2: LevelDef = {
   sky: 0x8fcbe8,
   fogNear: 30,
   fogFar: 80,
-  sizeNames: ['a bunny', 'a cat', 'a dog', 'a pony', 'a hippo', 'a car', 'a HOUSE'],
+  sizeNames: ['a coconut', 'a melon', 'a bunny', 'a cat', 'a dog', 'a kid', 'a person'],
   goalName: 'GOLDEN PINECONE ✨',
   laneZs: [11, 3, -5],
 
@@ -388,6 +408,7 @@ const level2: LevelDef = {
         [-6.8, -12.5, 1.5, 2.6],
         [-4.2, -15.2, 1.3, 4.6],
       ],
+      [-12, -12],
       (y) => new GoalTreat(0, -17, y, this.targetRadius * 0.85 - 0.02, 'pinecone'),
     );
 
