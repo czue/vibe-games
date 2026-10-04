@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DIFFICULTIES, type DifficultyName } from './difficulty';
 
 interface Bubble {
   el: HTMLDivElement;
@@ -6,6 +7,11 @@ interface Bubble {
   getPos: () => THREE.Vector3;
   ttl: number;
 }
+
+const MODE_BLURBS: Record<DifficultyName, string> = {
+  easy: 'More hearts, fewer logs, sleepy squashes',
+  regular: 'For brave blobs',
+};
 
 function el(id: string): HTMLElement {
   return document.getElementById(id)!;
@@ -94,8 +100,20 @@ export class UI {
       </ul>
       <p>Swallow things smaller than you to grow bigger.<br>
       Watch out for squashes, rolling logs, pinecones and thorny vines!</p>
-      <p class="press">Press Enter to start</p>`;
+      <div class="modes">
+        ${Object.values(DIFFICULTIES)
+          .map((d) => `<button class="mode" data-mode="${d.name}">${d.label}<small>${MODE_BLURBS[d.name]}</small></button>`)
+          .join('')}
+      </div>
+      <p class="press">Pick a mode and press Enter</p>`;
     this.overlay.classList.add('show');
+  }
+
+  /** Highlight the selected difficulty button on the title screen. */
+  selectMode(name: DifficultyName): void {
+    for (const btn of this.overlay.querySelectorAll<HTMLButtonElement>('.mode')) {
+      btn.classList.toggle('selected', btn.dataset.mode === name);
+    }
   }
 
   showFinale(): void {

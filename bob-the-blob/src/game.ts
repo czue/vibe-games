@@ -6,6 +6,7 @@ import { UI } from './ui';
 import { Input } from './input';
 import { sfx } from './audio';
 import { LEVELS, type LevelDef } from './levels';
+import { difficulty } from './difficulty';
 
 const GRAVITY = 28;
 const SWALLOW_REPEAT = 0.18;
@@ -92,6 +93,7 @@ export class Game {
     const b = this.bob;
     b.volume = this.startVolume;
     b.stomach = [];
+    b.maxHearts = difficulty.hearts;
     b.hearts = b.maxHearts;
     b.pos.set(this.level.start[0], 0, this.level.start[1]);
     b.vel.set(0, 0, 0);
@@ -101,7 +103,7 @@ export class Game {
     b.facing = 0;
 
     this.level.build(this);
-    this.ui.setLevelName(`Level ${i + 1}: ${this.level.name}`);
+    this.ui.setLevelName(`Level ${i + 1}: ${this.level.name} · ${difficulty.label}`);
     this.updateCamera(0, true);
   }
 
@@ -426,7 +428,7 @@ export class Game {
 
   private finishEating(t: Thing): void {
     const b = this.bob;
-    const gain = t.size ** 3 * 1.5 * t.growth + 0.01;
+    const gain = (t.size ** 3 * 1.5 * t.growth + 0.01) * difficulty.growthMul;
     // Bob can't grow past "big enough" — the only way forward is the goal treat.
     b.volume = Math.min(b.volume + gain, this.level.targetRadius ** 3);
     b.stomach.push({ thing: t, gain });
@@ -513,7 +515,7 @@ export class Game {
     sfx.splat();
     this.shake = Math.max(this.shake, 0.4);
     this.bobSay(text);
-    this.dropStuff(4);
+    this.dropStuff(difficulty.squashDrop);
   }
 
   hurtBob(from: THREE.Vector3, text: string): void {

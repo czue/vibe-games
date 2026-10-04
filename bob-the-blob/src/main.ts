@@ -4,6 +4,7 @@ import { UI } from './ui';
 import { Input } from './input';
 import { LEVELS } from './levels';
 import { unlockAudio } from './audio';
+import { difficulty, setDifficulty, type DifficultyName } from './difficulty';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -24,19 +25,38 @@ const params = new URLSearchParams(window.location.search);
 const requested = parseInt(params.get('level') ?? '1', 10) - 1;
 const startLevel = Number.isNaN(requested) ? 0 : THREE.MathUtils.clamp(requested, 0, LEVELS.length - 1);
 
-game.loadLevel(startLevel);
-ui.showTitle();
+let selectedMode: DifficultyName = difficulty.name;
+
+function showTitle(): void {
+  game.state = 'title';
+  ui.showTitle();
+  ui.selectMode(selectedMode);
+}
 
 function begin(): void {
   unlockAudio();
   ui.hideOverlay();
-  if (game.state === 'done') game.loadLevel(0);
+  setDifficulty(selectedMode);
+  // Reload so the level is built with the chosen mode's squashes, logs and hearts.
+  game.loadLevel(startLevel);
   game.announceLevel();
   game.state = 'play';
 }
 
-window.addEventListener('click', () => {
-  if (game.state === 'title' || game.state === 'done') begin();
+game.loadLevel(startLevel);
+showTitle();
+
+window.addEventListener('click', (e) => {
+  if (game.state === 'done') {
+    showTitle();
+    return;
+  }
+  if (game.state !== 'title') return;
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.mode');
+  if (!btn) return;
+  selectedMode = btn.dataset.mode as DifficultyName;
+  ui.selectMode(selectedMode);
+  begin();
 });
 
 window.addEventListener('resize', () => {
@@ -48,7 +68,14 @@ window.addEventListener('resize', () => {
 const clock = new THREE.Clock();
 function frame(): void {
   const dt = clock.getDelta();
-  if ((game.state === 'title' || game.state === 'done') && input.wasPressed('Enter', 'Space')) begin();
+  if (game.state === 'title') {
+    if (input.wasPressed('ArrowLeft', 'ArrowUp', 'KeyA', 'KeyW')) selectedMode = 'easy';
+    if (input.wasPressed('ArrowRight', 'ArrowDown', 'KeyD', 'KeyS')) selectedMode = 'regular';
+    ui.selectMode(selectedMode);
+    if (input.wasPressed('Enter', 'Space')) begin();
+  } else if (game.state === 'done' && input.wasPressed('Enter', 'Space')) {
+    showTitle();
+  }
   game.update(dt);
   renderer.render(scene, camera);
   input.endFrame();

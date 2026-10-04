@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Thing, mat, mesh, rand, pick, angleTo, turnToward } from './things';
 import { makeEyes, makeMouth, makeStars } from './faces';
 import type { Game } from './game';
+import { difficulty } from './difficulty';
 
 const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
 
@@ -100,7 +101,7 @@ export class Squash extends Thing {
     if (this.hopT >= 1) {
       this.pos.y = 0;
       this.state = 'idle';
-      this.timer = rand(0.7, 1.3);
+      this.timer = rand(...difficulty.squashRest);
       this.squish = 1;
       game.pushOut(this);
       game.onSquashLand(this);
@@ -110,9 +111,9 @@ export class Squash extends Thing {
   private startHop(game: Game): void {
     const bob = game.bob;
     this.from.copy(this.pos);
-    if (flatDist(bob.pos, this.pos) < this.aggro && bob.squashTimer <= 0) {
+    if (flatDist(bob.pos, this.pos) < this.aggro * difficulty.squashAggroMul && bob.squashTimer <= 0) {
       // Aim where Bob is heading, not where he is.
-      const lead = (0.5 + this.size * 0.2) * 0.35;
+      const lead = (0.5 + this.size * 0.2) * difficulty.squashLead;
       this.to.set(bob.pos.x + bob.vel.x * lead, 0, bob.pos.z + bob.vel.z * lead);
       const maxHop = this.size * 3 + 2;
       const dx = this.to.x - this.from.x;
@@ -127,7 +128,7 @@ export class Squash extends Thing {
     this.to.x = THREE.MathUtils.clamp(this.to.x, -lim, lim);
     this.to.z = THREE.MathUtils.clamp(this.to.z, -lim, lim);
     this.hopT = 0;
-    this.hopDur = 0.5 + this.size * 0.2;
+    this.hopDur = (0.5 + this.size * 0.2) * difficulty.squashHopMul;
     this.hopH = this.size * 1.5 + 1;
     this.state = 'hop';
   }
@@ -615,7 +616,7 @@ export class Bigfoot extends Thing {
         }
         break;
       case 'wander':
-        if (dist < 10 * s + 2) {
+        if (dist < (10 * s + 2) * difficulty.bigfootNoticeMul) {
           this.state = 'chase';
           game.thingSay(this, pick(['A BLOB! 👀', 'Ooh, jelly!', 'Hey little guy!']));
           break;
@@ -635,7 +636,7 @@ export class Bigfoot extends Thing {
         }
         if (dist < 5 * s + 1.5 && this.cooldown <= 0 && bob.squashTimer <= 0 && bob.radius < this.size * 0.8) {
           this.state = 'windup';
-          this.timer = 0.7;
+          this.timer = difficulty.bigfootWindup;
           this.target.set(bob.pos.x, 0, bob.pos.z);
           this.marker.position.set(this.target.x, 0.04, this.target.z);
           this.marker.visible = true;
@@ -683,7 +684,7 @@ export class Bigfoot extends Thing {
         this.body.scale.lerp(new THREE.Vector3(s, s, s), Math.min(1, dt * 4));
         if (this.timer <= 0) {
           this.state = 'chase';
-          this.cooldown = rand(2, 3.5);
+          this.cooldown = rand(...difficulty.bigfootCooldown);
         }
         break;
     }

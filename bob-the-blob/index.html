@@ -83,6 +83,16 @@
     #overlay .tag { font-size: 24px; opacity: 0.9; }
     #overlay .controls { list-style: none; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
     #overlay .controls li { background: rgba(255,255,255,0.15); padding: 8px 14px; border-radius: 12px; }
+    #overlay .modes { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+    #overlay .mode {
+      font-family: inherit; font-size: 30px; font-weight: 700; color: white; cursor: pointer;
+      background: rgba(255,255,255,0.12); border: 4px solid rgba(255,255,255,0.35);
+      border-radius: 20px; padding: 12px 28px; min-width: 240px;
+      transition: transform 0.15s, background 0.15s, border-color 0.15s;
+    }
+    #overlay .mode small { display: block; font-size: 15px; font-weight: 400; opacity: 0.85; margin-top: 2px; }
+    #overlay .mode:hover { transform: scale(1.04); }
+    #overlay .mode.selected { background: #7ddf64; border-color: #c6ff4d; color: #1b5e20; transform: scale(1.08); }
     #overlay .press { font-size: 28px; font-weight: 700; animation: pulse 1.2s infinite; }
     @keyframes pulse { 50% { transform: scale(1.08); } }
 

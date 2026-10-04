@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Game } from './game';
+import { difficulty, someOf } from './difficulty';
 import {
   mat,
   rand,
@@ -119,6 +120,11 @@ interface Lane {
   timer: number;
 }
 
+/** On easy mode only the middle lane has logs. */
+function activeLanes(lanes: Lane[]): Lane[] {
+  return difficulty.allLogLanes ? lanes : [lanes[Math.floor(lanes.length / 2)]];
+}
+
 function addLanes(game: Game, lanes: Lane[], stumpR: number, stumpH: number): void {
   const B = game.bounds;
   for (const lane of lanes) {
@@ -132,10 +138,9 @@ function tickLanes(game: Game, lanes: Lane[], dt: number): void {
   for (const lane of lanes) {
     lane.timer -= dt;
     if (lane.timer > 0) continue;
-    lane.timer = rand(...lane.every);
-    game.add(
-      new RollingLog(-lane.dir * (B - 1.5), lane.z, new THREE.Vector3(lane.dir, 0, 0), lane.logR, lane.length, lane.speed),
-    );
+    lane.timer = rand(...lane.every) * difficulty.logGapMul;
+    const speed = lane.speed * difficulty.logSpeedMul;
+    game.add(new RollingLog(-lane.dir * (B - 1.5), lane.z, new THREE.Vector3(lane.dir, 0, 0), lane.logR, lane.length, speed));
   }
 }
 
@@ -188,11 +193,11 @@ const level1: LevelDef = {
   laneZs: [9, 1, -7],
 
   build(game) {
-    l1Lanes = [
+    l1Lanes = activeLanes([
       { z: 9, dir: 1, speed: 4.5, every: [3.2, 5], logR: 0.45, length: 3, timer: 0.5 },
       { z: 1, dir: -1, speed: 5, every: [3, 4.8], logR: 0.45, length: 3, timer: 1.5 },
       { z: -7, dir: 1, speed: 5.5, every: [2.8, 4.5], logR: 0.5, length: 3.2, timer: 1 },
-    ];
+    ]);
     l1ConeTimer = 6;
     l1FoodTimer = 0;
     const B = this.bounds;
@@ -282,11 +287,11 @@ const level1: LevelDef = {
     }
 
     // Squashes!
-    for (const [x, z] of [
+    for (const [x, z] of someOf([
       [-4, -10],
       [10, -16],
       [-12, 4],
-    ]) {
+    ])) {
       game.add(new Squash(x, z, 1.4, 8));
     }
 
@@ -312,7 +317,7 @@ const level1: LevelDef = {
 
     l1ConeTimer -= dt;
     if (l1ConeTimer <= 0) {
-      l1ConeTimer = rand(2.5, 4.5);
+      l1ConeTimer = rand(2.5, 4.5) * difficulty.coneGapMul;
       if (game.things.filter((t) => t.kind === 'pinecone').length < 12) dropCone(game, 0.55, 2.5);
     }
 
@@ -353,11 +358,11 @@ const level2: LevelDef = {
 
   build(game) {
     // Logs here are longer than Bob will ever be big, so they stay dangerous the whole level.
-    l2Lanes = [
+    l2Lanes = activeLanes([
       { z: 11, dir: 1, speed: 5, every: [3.2, 5], logR: 0.6, length: 3.4, timer: 0.5 },
       { z: 3, dir: -1, speed: 6, every: [3, 4.8], logR: 0.6, length: 3.4, timer: 1.5 },
       { z: -5, dir: 1, speed: 6.5, every: [2.8, 4.5], logR: 0.65, length: 3.6, timer: 1 },
-    ];
+    ]);
     l2ConeTimer = 5;
     l2FoodTimer = 0;
     const B = this.bounds;
@@ -425,10 +430,10 @@ const level2: LevelDef = {
 
     // Little snack squashes, plus medium ones that can still flatten Bob until he's grown.
     for (let i = 0; i < 5; i++) game.add(new Squash(...freeSpot(game, 0.8), 0.5, 8));
-    for (const [x, z] of [
+    for (const [x, z] of someOf([
       [-8, 7],
       [-3, -10],
-    ]) {
+    ])) {
       game.add(new Squash(x, z, 1.2, 8));
     }
     game.add(new Bigfoot(6, -12, 1));
@@ -445,7 +450,7 @@ const level2: LevelDef = {
 
     l2ConeTimer -= dt;
     if (l2ConeTimer <= 0) {
-      l2ConeTimer = rand(3, 5);
+      l2ConeTimer = rand(3, 5) * difficulty.coneGapMul;
       if (game.things.filter((t) => t.kind === 'pinecone').length < 16) dropCone(game, 0.22, 2);
     }
 

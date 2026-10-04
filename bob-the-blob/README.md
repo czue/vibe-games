@@ -21,6 +21,15 @@ Then open the URL shown in the terminal (usually http://localhost:5173). Add `?l
 - **E** — Swallow (hold it down to keep slurping!)
 - **Q** — Spit the last thing you ate (stuns squashes and Bigfoot)
 
+## Difficulty
+
+Pick a mode on the title screen (click it, or use the arrow keys and Enter). The game remembers your choice.
+
+- **🌱 Easy** — 5 hearts, one log lane, fewer and sleepier squashes, fewer pinecones, a calmer Bigfoot, and Bob grows faster.
+- **🔥 Regular** — 3 hearts, three log lanes, and squashes that aim where you're going.
+
+All the difficulty numbers live in `src/difficulty.ts` if you want to tweak them.
+
 ## How to Play
 
 - You can only swallow things **smaller than you**. The more you eat, the bigger you get.
