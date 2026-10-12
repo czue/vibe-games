@@ -20,6 +20,7 @@ export interface Difficulty {
   bigfootNoticeMul: number;
   bigfootWindup: number; // seconds of warning before the leap
   bigfootCooldown: [number, number];
+  yeti: boolean; // Bigfoot's too-big-to-eat cousin in level 3
 }
 
 export const DIFFICULTIES: Record<DifficultyName, Difficulty> = {
@@ -42,6 +43,7 @@ export const DIFFICULTIES: Record<DifficultyName, Difficulty> = {
     bigfootNoticeMul: 0.7,
     bigfootWindup: 1.1,
     bigfootCooldown: [3.5, 5.5],
+    yeti: false,
   },
   regular: {
     name: 'regular',
@@ -62,6 +64,7 @@ export const DIFFICULTIES: Record<DifficultyName, Difficulty> = {
     bigfootNoticeMul: 1,
     bigfootWindup: 0.7,
     bigfootCooldown: [2, 3.5],
+    yeti: true,
   },
 };
 

@@ -12,7 +12,9 @@ export type Kind =
   | 'thorn'
   | 'flower'
   | 'bigfoot'
-  | 'bug';
+  | 'bug'
+  | 'car'
+  | 'person';
 
 /**
  * Everything in the world that isn't Bob. Positions are "feet" positions:
@@ -37,6 +39,7 @@ export class Thing {
   beingEaten = false;
   thrown = false;
   isGoal = false; // swallowing this finishes the level
+  noAutoEatUntil = 0; // game time before Bob will gobble it up just by touching it
 
   constructor(public kind: Kind) {}
 
@@ -56,6 +59,9 @@ export class Thing {
   }
 
   onSpat(): void {}
+
+  /** Called the moment Bob starts swallowing this. */
+  onSwallowStart(): void {}
 
   sync(): void {
     this.group.position.copy(this.pos);

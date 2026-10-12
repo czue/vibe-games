@@ -87,7 +87,7 @@ export class UI {
     this.bubbles = this.bubbles.filter((b) => b.ttl > 0);
   }
 
-  showTitle(): void {
+  showTitle(levelNames: string[]): void {
     this.overlay.innerHTML = `
       <h1>Bob the Blob</h1>
       <p class="tag">A very hungry blob in a very big forest</p>
@@ -95,18 +95,29 @@ export class UI {
       <ul class="controls">
         <li><b>WASD</b> / <b>Arrows</b> move</li>
         <li><b>Space</b> jump</li>
-        <li><b>E</b> swallow (hold it!)</li>
+        <li>Bump into food to <b>eat it</b></li>
+        <li><b>E</b> big slurp</li>
         <li><b>Q</b> spit it back out</li>
       </ul>
       <p>Swallow things smaller than you to grow bigger.<br>
       Watch out for squashes, rolling logs, pinecones and thorny vines!</p>
+      <div class="levels">
+        ${levelNames.map((n, i) => `<button class="level" data-level="${i}"><b>${i + 1}</b>${n}</button>`).join('')}
+      </div>
       <div class="modes">
         ${Object.values(DIFFICULTIES)
           .map((d) => `<button class="mode" data-mode="${d.name}">${d.label}<small>${MODE_BLURBS[d.name]}</small></button>`)
           .join('')}
       </div>
-      <p class="press">Pick a mode and press Enter</p>`;
+      <p class="press">Pick a level and a mode, then press Enter</p>`;
     this.overlay.classList.add('show');
+  }
+
+  /** Highlight the selected level button on the title screen. */
+  selectLevel(index: number): void {
+    for (const btn of this.overlay.querySelectorAll<HTMLButtonElement>('.level')) {
+      btn.classList.toggle('selected', btn.dataset.level === String(index));
+    }
   }
 
   /** Highlight the selected difficulty button on the title screen. */
@@ -116,10 +127,10 @@ export class UI {
     }
   }
 
-  showFinale(): void {
+  showFinale(sizeName: string): void {
     this.overlay.innerHTML = `
-      <h1>BOB IS PERSON-SIZED!</h1>
-      <p class="tag">He ate so much of the forest that he's as big as a grown-up.</p>
+      <h1>BOB ATE BIGFOOT!</h1>
+      <p class="tag">He ate the forest, a whole snack stop, and Bigfoot.<br>Now he's as big as ${sizeName}!</p>
       <p>But he's still hungry... One day he'll eat 🪐 <b>PLANETS</b> 🪐<br><small>(that's a LOT of levels away!)</small></p>
       <p class="press">Press Enter to play again</p>`;
     this.overlay.classList.add('show');

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Game } from './game';
 import { difficulty, someOf } from './difficulty';
+import { sfx } from './audio';
 import {
   mat,
   rand,
@@ -21,6 +22,19 @@ import {
   Ramp,
 } from './things';
 import { Bigfoot, FallingCone, FlowerVine, GoalTreat, Ladybug, RollingLog, Squash, ThornVine } from './enemies';
+import {
+  Car,
+  Person,
+  RollingBoulder,
+  addRoad,
+  makeCliffChunk,
+  makeLampPost,
+  makePicnicTable,
+  makeRandomSnack,
+  makeSnackShack,
+  makeTrafficCone,
+  makeTrashCan,
+} from './town';
 
 export interface LevelDef {
   name: string;
@@ -116,6 +130,7 @@ function countSmallFood(game: Game, maxSize: number): number {
 // ---------- Log lanes ----------
 
 interface Lane {
+  vehicle?: 'log' | 'car';
   z: number;
   dir: 1 | -1;
   speed: number;
@@ -133,6 +148,10 @@ function activeLanes(lanes: Lane[]): Lane[] {
 function addLanes(game: Game, lanes: Lane[], stumpR: number, stumpH: number): void {
   const B = game.bounds;
   for (const lane of lanes) {
+    if (lane.vehicle === 'car') {
+      addRoad(game, lane.z, 4.2);
+      continue;
+    }
     addLane(game, lane.z, lane.length + 0.4);
     game.add(makeStump(-lane.dir * (B + 0.5), lane.z, stumpR, stumpH, lane.dir));
   }
@@ -145,6 +164,10 @@ function tickLanes(game: Game, lanes: Lane[], dt: number): void {
     if (lane.timer > 0) continue;
     lane.timer = rand(...lane.every) * difficulty.logGapMul;
     const speed = lane.speed * difficulty.logSpeedMul;
+    if (lane.vehicle === 'car') {
+      game.add(new Car(-lane.dir * (B + 4), lane.z, lane.dir, speed));
+      continue;
+    }
     game.add(new RollingLog(-lane.dir * (B - 1.5), lane.z, new THREE.Vector3(lane.dir, 0, 0), lane.logR, lane.length, speed));
   }
 }
@@ -488,4 +511,137 @@ const level2: LevelDef = {
   },
 };
 
-export const LEVELS: LevelDef[] = [level1, level2];
+// =====================================================================
+// Level 3: person-sized Bob leaves the forest and finds a roadside snack stop
+// =====================================================================
+
+let l3Lanes: Lane[] = [];
+let l3SlideTimer = 0;
+let l3FoodTimer = 0;
+
+const level3: LevelDef = {
+  name: 'The Snack Stop',
+  subtitle: 'Bob left the forest. Look both ways!',
+  bounds: 24,
+  start: [0, 20],
+  startRadius: 0.5,
+  targetRadius: 1.6,
+  sky: 0xa7dcff,
+  fogNear: 32,
+  fogFar: 85,
+  sizeNames: ['a person', 'a gorilla', 'a horse', 'a cow', 'a hippo', 'a rhino', 'an elephant'],
+  goalName: 'BIGFOOT 🦶',
+  laneZs: [12, 4, -4],
+
+  build(game) {
+    l3Lanes = activeLanes([
+      { vehicle: 'car', z: 12, dir: 1, speed: 7, every: [2.8, 4.8], logR: 0, length: 0, timer: 0.5 },
+      { vehicle: 'car', z: 4, dir: -1, speed: 8, every: [2.6, 4.4], logR: 0, length: 0, timer: 1.5 },
+      { vehicle: 'car', z: -4, dir: 1, speed: 8.5, every: [2.4, 4.2], logR: 0, length: 0, timer: 1 },
+    ]);
+    l3SlideTimer = 6;
+    l3FoodTimer = 0;
+    const B = this.bounds;
+    addGround(game, 0x8bc34a, 0xd7c08a, 0x9ccc65);
+    addLanes(game, l3Lanes, 0, 0);
+
+    // The cliff along the back, where the rock slides come from
+    for (let x = -B - 2; x <= B + 2; x += 3) game.add(makeCliffChunk(x + rand(-0.5, 0.5), -B - 1.5, rand(2.2, 3), rand(6, 10)));
+    for (let x = -B + 2; x <= B - 2; x += 7) game.add(makeCliffChunk(x + rand(-1, 1), -B + 1, rand(1.2, 1.6), rand(2.5, 4)));
+    // Trees down the sides, rocks along the front
+    for (let z = -B; z <= B - 6; z += 2.5) {
+      if (this.laneZs.some((lz) => Math.abs(lz - z) < 2.8)) continue;
+      game.add(makePineTree(-B - 1.5, z, rand(0.9, 1.2)));
+      game.add(makePineTree(B + 1.5, z, rand(0.9, 1.2)));
+    }
+    for (let x = -B; x <= B; x += 1.8) game.add(makeRock(x, B + 1, rand(0.6, 0.9), false));
+    for (const side of [-1, 1]) for (let z = B - 6; z <= B; z += 1.7) game.add(makeRock(side * (B + 1), z, rand(0.6, 0.9), false));
+
+    // The snack stop
+    game.add(makeSnackShack(15, 19.5));
+    const tables: [number, number][] = [
+      [-9, 18.5],
+      [-15, 8],
+      [9, 8],
+      [-6, 0],
+      [12, 0],
+      [-12, -12],
+      [6, -16],
+    ];
+    for (const [x, z] of tables) {
+      const table = game.add(makePicnicTable(x, z));
+      game.add(makeRandomSnack(x - 0.4, z, 0.25)).pos.y = table.top;
+      game.add(makeRandomSnack(x + 0.5, z + 0.1, 0.22)).pos.y = table.top;
+    }
+    for (const x of [-16, 0, 16]) {
+      game.add(makeLampPost(x, 14.8));
+      game.add(makeLampPost(x + 4, -6.8));
+    }
+    for (const [x, z] of [
+      [-4, 17],
+      [5, 0],
+      [-18, -1],
+      [3, -11],
+      [17, -10],
+    ]) {
+      game.add(makeTrashCan(x, z, rand(0.55, 0.7)));
+    }
+
+    // People: nice picnickers toss Bob snacks, grumpy chefs swat him.
+    for (const [x, z] of [
+      [-10.5, 16.5],
+      [11.5, 6.5],
+      [-13.5, -10],
+    ]) {
+      game.add(new Person(x, z, 'nice'));
+    }
+    for (const [x, z] of [
+      [12, 16.6],
+      [-17, 1.2],
+    ]) {
+      game.add(new Person(x, z, 'grumpy'));
+    }
+
+    // One GIANT squash that can always flatten Bob, and lots of tiny snack squashes.
+    game.add(new Squash(-4, -14, 2.2, 9));
+    for (let i = 0; i < 7; i++) game.add(new Squash(...freeSpot(game, 0.5), 0.35, 7));
+
+    // Bigfoot is the goal this time: grow big enough, then catch him and swallow him!
+    const bigfootSize = this.targetRadius * 0.85 - 0.02;
+    game.add(new Bigfoot(-8, -9, bigfootSize / 2.4, { goal: true }));
+    // ...and his big cousin the Yeti, who is way too big to eat.
+    if (difficulty.yeti) game.add(new Bigfoot(12, -14, 1.15, { fur: 0xeef4f8, light: 0xb3d4e8 }));
+
+    for (let i = 0; i < 45; i++) game.add(makeRandomSnack(...freeSpot(game, 0.4), rand(0.18, 0.35)));
+    for (let i = 0; i < 8; i++) game.add(makeTrafficCone(...freeSpot(game, 0.5), rand(0.3, 0.4)));
+  },
+
+  tick(game, dt) {
+    tickLanes(game, l3Lanes, dt);
+
+    // Rock slides: a boulder breaks off the cliff and rolls toward the roads.
+    l3SlideTimer -= dt;
+    if (l3SlideTimer <= 0) {
+      l3SlideTimer = rand(4, 7) * difficulty.coneGapMul;
+      if (game.things.filter((t) => t instanceof RollingBoulder).length < 14) {
+        const lim = this.bounds - 2;
+        const x = THREE.MathUtils.clamp(game.bob.pos.x + rand(-6, 6), -lim, lim);
+        const boulder = game.add(new RollingBoulder(x, -this.bounds + 2.5, rand(0.5, 0.95), this.laneZs));
+        sfx.rumble();
+        game.shake(0.15);
+        game.ui.say(boulder, () => boulder.pos.clone().setY(boulder.height + 0.8), 'ROCK SLIDE! 🪨', 1.8, 'grumpy');
+      }
+    }
+
+    l3FoodTimer -= dt;
+    if (l3FoodTimer <= 0) {
+      l3FoodTimer = 1.3;
+      if (countSmallFood(game, 0.4) < 40) {
+        const [x, z] = freeSpot(game, 0.4);
+        if (Math.hypot(x - game.bob.pos.x, z - game.bob.pos.z) > 8) game.add(makeRandomSnack(x, z, rand(0.18, 0.35)));
+      }
+    }
+  },
+};
+
+export const LEVELS: LevelDef[] = [level1, level2, level3];

@@ -10,6 +10,7 @@ import { difficulty } from './difficulty';
 
 const GRAVITY = 28;
 const SWALLOW_REPEAT = 0.18;
+const AUTO_EAT_EVERY = 0.12;
 const EAT_TIME = 0.22;
 
 interface Eating {
@@ -36,8 +37,9 @@ export class Game {
   private eating: Eating[] = [];
   private particles: Particle[] = [];
   private sparkGeo = new THREE.SphereGeometry(0.08, 6, 4);
-  private shake = 0;
+  private shakeAmount = 0;
   private swallowRepeat = 0;
+  private autoEatTimer = 0;
   private growTimer = 0;
   private goalAnnounced = false;
   private rampUnderBob: Ramp | null = null;
@@ -177,6 +179,12 @@ export class Game {
         }
       }
       if (inp.wasPressed('KeyQ', 'KeyK')) this.spit();
+      // Bob gobbles up anything small enough that he bumps into — no button needed.
+      this.autoEatTimer -= dt;
+      if (this.autoEatTimer <= 0) {
+        this.trySwallow(false, true);
+        this.autoEatTimer = AUTO_EAT_EVERY;
+      }
     }
 
     this.moveBob(dt);
@@ -208,7 +216,7 @@ export class Game {
     if (bigEnough && !this.goalAnnounced) {
       this.goalAnnounced = true;
       sfx.heal();
-      this.ui.big(`Bob is big enough!<small>Now go swallow the ${this.level.goalName}!</small><small>(follow the light)</small>`, 4);
+      this.ui.big(`Bob is big enough!<small>Now go swallow the ${this.level.goalName}!</small><small>(follow the arrow)</small>`, 4);
     }
   }
 
@@ -378,10 +386,11 @@ export class Game {
 
   // ---------- Eating ----------
 
-  private trySwallow(announce: boolean): void {
+  /** `auto` = just bumping into things (short reach, any direction); otherwise it's an E-button slurp. */
+  private trySwallow(announce: boolean, auto = false): void {
     const b = this.bob;
     const r = b.radius;
-    const reach = r * 1.6 + 0.4;
+    const reach = auto ? r * 0.25 + 0.15 : r * 1.6 + 0.4;
     const fx = Math.sin(b.facing);
     const fz = Math.cos(b.facing);
     const centerY = b.pos.y + r * 0.8;
@@ -392,15 +401,16 @@ export class Game {
 
     for (const t of this.things) {
       if (!t.edible || t.dead || t.beingEaten || t.thrown) continue;
+      if (auto && this.time < t.noAutoEatUntil) continue;
       const dx = t.pos.x - b.pos.x;
       const dz = t.pos.z - b.pos.z;
       const flat = Math.hypot(dx, dz);
-      const dist = flat - t.radius;
+      const dist = flat - t.radius - (auto ? r : 0);
       if (dist > reach) continue;
       const dy = t.pos.y + t.height / 2 - centerY;
       if (Math.abs(dy) > r + t.height / 2 + 0.5) continue;
       const facingDot = flat > 1e-3 ? (dx * fx + dz * fz) / flat : 1;
-      if (facingDot < -0.2 && dist > r * 0.3) continue;
+      if (!auto && facingDot < -0.2 && dist > r * 0.3) continue;
       const score = dist - facingDot * r * 0.5;
       if (t.size < r * 0.85) {
         if (score < bestScore) {
@@ -415,6 +425,7 @@ export class Game {
 
     if (best) {
       best.beingEaten = true;
+      best.onSwallowStart();
       this.eating.push({ thing: best, t: 0, from: best.pos.clone() });
       b.gulpTimer = 0.25;
     } else if (announce) {
@@ -488,9 +499,17 @@ export class Game {
     const sp = 11 + r * 3;
     t.vel.set(fx * sp, 3.5, fz * sp);
     t.onSpat();
+    t.noAutoEatUntil = this.time + 2.5;
     this.add(t);
     sfx.spit();
     b.gulpTimer = 0.15;
+  }
+
+  /** Throw something into the world (e.g. a picnicker tossing Bob a snack). */
+  launch(t: Thing, vel: THREE.Vector3): void {
+    t.thrown = true;
+    t.vel.copy(vel);
+    this.add(t);
   }
 
   private reviveThing(t: Thing): void {
@@ -515,6 +534,7 @@ export class Game {
       t.pos.set(b.pos.x, b.pos.y + r, b.pos.z);
       t.vel.set(Math.cos(a) * sp, rand(5, 8), Math.sin(a) * sp);
       t.onSpat();
+      t.noAutoEatUntil = this.time + 2.5;
       this.add(t);
     }
   }
@@ -533,7 +553,7 @@ export class Game {
     b.squashTimer = 1.4;
     b.vel.set(0, 0, 0);
     sfx.splat();
-    this.shake = Math.max(this.shake, 0.4);
+    this.shake(0.4);
     this.bobSay(text);
     this.dropStuff(difficulty.squashDrop);
   }
@@ -544,7 +564,7 @@ export class Game {
     b.hearts--;
     b.invuln = 1.5;
     sfx.hurt();
-    this.shake = Math.max(this.shake, 0.2);
+    this.shake(0.2);
     const dx = b.pos.x - from.x;
     const dz = b.pos.z - from.z;
     const d = Math.hypot(dx, dz) || 1;
@@ -579,7 +599,7 @@ export class Game {
     const b = this.bob;
     const d = Math.hypot(b.pos.x - sq.pos.x, b.pos.z - sq.pos.z);
     if (d < 14) sfx.thud();
-    if (d < 6) this.shake = Math.max(this.shake, 0.12 * sq.size);
+    if (d < 6) this.shake(0.12 * sq.size);
     if (d < sq.radius * 0.9 + b.radius * 0.6 && b.pos.y < sq.height * 0.5) {
       if (b.radius < sq.size * 1.1) {
         this.squashBob(pick(['SPLAT! 🥞', 'Squashed by a squash!', 'Pancake Bob! 🥞']));
@@ -603,7 +623,7 @@ export class Game {
   onBigfootStomp(bf: Bigfoot): void {
     const b = this.bob;
     sfx.stomp();
-    this.shake = Math.max(this.shake, 0.8);
+    this.shake(0.8);
     this.sparkle(bf.pos.clone().setY(0.2), 0x8d6e4a, 24, 2.5);
     const d = Math.hypot(b.pos.x - bf.pos.x, b.pos.z - bf.pos.z);
     if (d < bf.radius + b.radius * 0.6 + 0.4 && b.pos.y < 1 && b.radius < bf.size * 0.8) {
@@ -634,12 +654,16 @@ export class Game {
       this.state = 'play';
     } else {
       this.state = 'done';
-      this.ui.showFinale();
+      this.ui.showFinale(this.level.sizeNames[this.level.sizeNames.length - 1]);
     }
     this.ui.setFade(0);
   }
 
   // ---------- Effects, speech, camera ----------
+
+  shake(amount: number): void {
+    this.shakeAmount = Math.max(this.shakeAmount, amount);
+  }
 
   sparkle(pos: THREE.Vector3, color: number, n = 12, spread = 1): void {
     const material = new THREE.MeshBasicMaterial({ color, transparent: true });
@@ -682,9 +706,9 @@ export class Game {
     const k = snap ? 1 : 1 - Math.exp(-4 * dt);
     this.camera.position.lerp(desired, k);
     this.camLook.lerp(look, k);
-    if (this.shake > 0) {
-      this.shake = Math.max(0, this.shake - dt);
-      const s = this.shake * 0.6 * zoom;
+    if (this.shakeAmount > 0) {
+      this.shakeAmount = Math.max(0, this.shakeAmount - dt);
+      const s = this.shakeAmount * 0.6 * zoom;
       this.camera.position.add(new THREE.Vector3(rand(-s, s), rand(-s, s), rand(-s, s)));
     }
     this.camera.lookAt(this.camLook);

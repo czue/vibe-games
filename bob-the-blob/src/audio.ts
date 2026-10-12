@@ -63,5 +63,15 @@ export const sfx = {
     noise(0.2, 0.4, 3000);
     tone(900, 100, 0.3, 'square', 0.1);
   },
+  honk: () => {
+    tone(392, 392, 0.18, 'square', 0.07);
+    tone(330, 330, 0.18, 'square', 0.07);
+    tone(392, 392, 0.25, 'square', 0.07, 0.22);
+    tone(330, 330, 0.25, 'square', 0.07, 0.22);
+  },
+  rumble: () => {
+    noise(1.2, 0.5, 180);
+    tone(60, 35, 1.0, 'sine', 0.3);
+  },
   levelUp: () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f * 1.01, 0.25, 'triangle', 0.2, i * 0.12)),
 };

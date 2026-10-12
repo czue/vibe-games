@@ -26,11 +26,13 @@ const requested = parseInt(params.get('level') ?? '1', 10) - 1;
 const startLevel = Number.isNaN(requested) ? 0 : THREE.MathUtils.clamp(requested, 0, LEVELS.length - 1);
 
 let selectedMode: DifficultyName = difficulty.name;
+let selectedLevel = startLevel;
 
 function showTitle(): void {
   game.state = 'title';
-  ui.showTitle();
+  ui.showTitle(LEVELS.map((l) => l.name));
   ui.selectMode(selectedMode);
+  ui.selectLevel(selectedLevel);
 }
 
 function begin(): void {
@@ -38,7 +40,7 @@ function begin(): void {
   ui.hideOverlay();
   setDifficulty(selectedMode);
   // Reload so the level is built with the chosen mode's squashes, logs and hearts.
-  game.loadLevel(startLevel);
+  game.loadLevel(selectedLevel);
   game.announceLevel();
   game.state = 'play';
 }
@@ -52,6 +54,12 @@ window.addEventListener('click', (e) => {
     return;
   }
   if (game.state !== 'title') return;
+  const levelBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('.level');
+  if (levelBtn) {
+    selectedLevel = Number(levelBtn.dataset.level);
+    ui.selectLevel(selectedLevel);
+    return;
+  }
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.mode');
   if (!btn) return;
   selectedMode = btn.dataset.mode as DifficultyName;
@@ -72,6 +80,11 @@ function frame(): void {
     if (input.wasPressed('ArrowLeft', 'ArrowUp', 'KeyA', 'KeyW')) selectedMode = 'easy';
     if (input.wasPressed('ArrowRight', 'ArrowDown', 'KeyD', 'KeyS')) selectedMode = 'regular';
     ui.selectMode(selectedMode);
+    // Number keys pick a level
+    LEVELS.forEach((_, i) => {
+      if (input.wasPressed(`Digit${i + 1}`)) selectedLevel = i;
+    });
+    ui.selectLevel(selectedLevel);
     if (input.wasPressed('Enter', 'Space')) begin();
   } else if (game.state === 'done' && input.wasPressed('Enter', 'Space')) {
     showTitle();

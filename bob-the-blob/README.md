@@ -12,13 +12,14 @@ npm install
 npx vite
 ```
 
-Then open the URL shown in the terminal (usually http://localhost:5173). Add `?level=2` to the URL to skip to level 2.
+Then open the URL shown in the terminal (usually http://localhost:5173). Pick a level and a difficulty on the title screen.
 
 ## Controls
 
 - **WASD / Arrow Keys** — Move
 - **Space** — Jump
-- **E** — Swallow (hold it down to keep slurping!)
+- **Bump into food** to eat it
+- **E** — Big slurp: grab things a bit further away (hold it down to keep slurping!)
 - **Q** — Spit the last thing you ate (stuns squashes and Bigfoot)
 
 ## Difficulty
@@ -47,5 +48,9 @@ All the difficulty numbers live in `src/difficulty.ts` if you want to tweak them
 
 1. **The Forest Floor** — Bob is ant-sized and everything is huge. Goal: the Giant Strawberry 🍓.
 2. **The Big Woods** — Bob starts coconut-sized and grows to the size of a person, the little squashes are snacks (the medium ones aren't!), and Bigfoot is on the loose. Goal: the Golden Pinecone ✨.
+3. **The Snack Stop** — Bob leaves the forest and finds a roadside rest stop full of dropped junk food.
+   Cross the roads without getting run over by googly-eyed cars, dodge rock slides, the GIANT squash,
+   a grumpy frying-pan chef, and the Yeti. Nice picnickers toss you snacks. Goal: grow big enough to
+   **eat Bigfoot** (he'll run away once you're bigger than him!).
 
 Coming someday (many, many levels from now): planets. 🪐

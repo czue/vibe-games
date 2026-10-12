@@ -83,6 +83,15 @@
     #overlay .tag { font-size: 24px; opacity: 0.9; }
     #overlay .controls { list-style: none; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
     #overlay .controls li { background: rgba(255,255,255,0.15); padding: 8px 14px; border-radius: 12px; }
+    #overlay .levels { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    #overlay .level {
+      font-family: inherit; font-size: 16px; color: white; cursor: pointer;
+      background: rgba(255,255,255,0.1); border: 3px solid rgba(255,255,255,0.3);
+      border-radius: 14px; padding: 6px 16px; min-width: 150px;
+    }
+    #overlay .level b { display: block; font-size: 26px; }
+    #overlay .level:hover { background: rgba(255,255,255,0.2); }
+    #overlay .level.selected { background: #fff59d; border-color: #ffeb3b; color: #5d4037; }
     #overlay .modes { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
     #overlay .mode {
       font-family: inherit; font-size: 30px; font-weight: 700; color: white; cursor: pointer;
@@ -121,7 +130,7 @@
     </div>
     <div id="bubbles"></div>
     <div id="big-message"></div>
-    <div id="hint">WASD / Arrows: move · Space: jump · E (hold): swallow · Q: spit</div>
+    <div id="hint">WASD / Arrows: move · Space: jump · bump food to eat · E: big slurp · Q: spit</div>
     <div id="fade"></div>
     <div id="overlay"></div>
   </div>

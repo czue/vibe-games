@@ -528,9 +528,21 @@ export class Bigfoot extends Thing {
   private arms: THREE.Group[] = [];
   private stars = makeStars();
   private marker: THREE.Mesh;
+  private arrow: THREE.Mesh | null = null;
+  private fleeTalk = 0;
 
-  constructor(x: number, z: number, private s: number) {
+  /**
+   * `goal: true` makes this the level's goal: once Bob is big enough he can swallow it
+   * (and it runs away from him). Fur colors let us make a white Yeti cousin.
+   */
+  constructor(
+    x: number,
+    z: number,
+    private s: number,
+    opts: { fur?: number; light?: number; goal?: boolean } = {},
+  ) {
     super('bigfoot');
+    this.isGoal = opts.goal ?? false;
     this.pos.set(x, 0, z);
     this.radius = 0.9 * s;
     this.visualRadius = 1.4 * s;
@@ -538,10 +550,10 @@ export class Bigfoot extends Thing {
     this.height = 4.4 * s;
     this.solid = true;
     this.edible = true;
-    this.color.set(0x6b4a2f);
+    this.color.set(opts.fur ?? 0x6b4a2f);
 
-    const fur = mat(0x6b4a2f);
-    const light = mat(0xc9a27a);
+    const fur = mat(opts.fur ?? 0x6b4a2f);
+    const light = mat(opts.light ?? 0xc9a27a);
     for (const side of [-1, 1]) {
       const leg = new THREE.Group();
       leg.position.set(side * 0.45, 1.3, 0);
@@ -586,6 +598,13 @@ export class Bigfoot extends Thing {
     this.stars.scale.setScalar(s * 1.5);
     this.group.add(this.body, this.stars);
 
+    if (this.isGoal) {
+      this.arrow = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 4), new THREE.MeshBasicMaterial({ color: 0xffeb3b }));
+      this.arrow.rotation.x = Math.PI;
+      this.arrow.visible = false;
+      this.group.add(this.arrow);
+    }
+
     this.marker = new THREE.Mesh(
       new THREE.RingGeometry(0.8, 1.15, 28),
       new THREE.MeshBasicMaterial({ color: 0xff3344, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }),
@@ -602,6 +621,32 @@ export class Bigfoot extends Thing {
     const dist = flatDist(bob.pos, this.pos);
     this.cooldown -= dt;
     let moving = false;
+
+    // Once Bob is big enough to swallow a goal Bigfoot, the Bigfoot panics and runs.
+    const scared = this.isGoal && bob.radius * 0.85 > this.size;
+    if (this.arrow) {
+      this.arrow.visible = scared;
+      this.arrow.position.y = this.height + 1 + Math.abs(Math.sin(game.time * 3)) * 0.8;
+      this.arrow.rotation.y += dt * 2;
+    }
+    if (scared && this.state !== 'stunned' && this.state !== 'leap') {
+      this.state = 'chase';
+      this.marker.visible = false;
+      this.body.scale.setScalar(s);
+      const away = new THREE.Vector3(this.pos.x - bob.pos.x, 0, this.pos.z - bob.pos.z).normalize();
+      // Veer along walls instead of getting stuck in a corner.
+      const lim = game.bounds - 2;
+      if (Math.abs(this.pos.x) > lim) away.x = -Math.sign(this.pos.x) * 0.5;
+      if (Math.abs(this.pos.z) > lim) away.z = -Math.sign(this.pos.z) * 0.5;
+      moving = this.moveToward(this.pos.clone().addScaledVector(away, 3), 3.2, dt);
+      this.fleeTalk -= dt;
+      if (this.fleeTalk <= 0) {
+        game.thingSay(this, pick(['AAAH! Not me!', "Don't eat me!! 😱", 'Help! A HUGE blob!', 'Run away, run away!']));
+        this.fleeTalk = rand(3, 5);
+      }
+      this.animateWalk(moving, dt, game);
+      return;
+    }
 
     switch (this.state) {
       case 'stunned':
@@ -690,6 +735,10 @@ export class Bigfoot extends Thing {
     }
 
     if (this.state === 'wander' || this.state === 'chase') this.body.scale.setScalar(s);
+    this.animateWalk(moving, dt, game);
+  }
+
+  private animateWalk(moving: boolean, dt: number, game: Game): void {
     if (moving) {
       this.walk += dt * 8;
       this.legs[0].rotation.x = Math.sin(this.walk) * 0.6;
@@ -700,6 +749,11 @@ export class Bigfoot extends Thing {
     } else if (this.state !== 'windup' && this.state !== 'leap') {
       for (const limb of [...this.legs, ...this.arms]) limb.rotation.x *= 1 - Math.min(1, dt * 8);
     }
+  }
+
+  onSwallowStart(): void {
+    this.marker.visible = false;
+    if (this.arrow) this.arrow.visible = false;
   }
 
   private moveToward(p: THREE.Vector3, speed: number, dt: number): boolean {
