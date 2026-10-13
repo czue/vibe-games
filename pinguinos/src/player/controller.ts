@@ -118,14 +118,16 @@ export class PlayerController {
       this.penguinGroup.rotation.y = currentRotation + angleDiff * this.rotationLerpFactor;
     }
 
-    // Ground check — start ray well below the capsule to avoid self-hit
+    // Ground check — start the ray just inside the capsule bottom (which sits at -0.8)
+    // and exclude our own body. Starting it below the capsule put the origin inside the
+    // floor collider while standing, so resting on the ground never counted as grounded.
     const pos = this.rigidBody.translation();
     const ray = new this.rapier.Ray(
-      { x: pos.x, y: pos.y - 0.85, z: pos.z },
+      { x: pos.x, y: pos.y - 0.75, z: pos.z },
       { x: 0, y: -1, z: 0 },
     );
-    const hit = this.world.castRay(ray, 0.5, true);
-    this._isGrounded = hit !== null && hit.timeOfImpact < this.groundRayThreshold && hit.timeOfImpact > 0.001;
+    const hit = this.world.castRay(ray, 0.5, true, undefined, undefined, undefined, this.rigidBody);
+    this._isGrounded = hit !== null && hit.timeOfImpact < this.groundRayThreshold;
 
     // Reset air jumps when grounded
     if (this._isGrounded) {
